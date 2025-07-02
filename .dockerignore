@@ -41,10 +41,6 @@ test_*.sh
 config.yaml
 config.production.yaml
 
-# Go
-*.out
-go.sum
-
 # Build artifacts
 oauth-proxy
 *.exe
