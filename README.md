@@ -33,7 +33,38 @@ The proxy uses PostgreSQL with the following tables:
 
 ## Configuration
 
-Create a `config.yaml` file:
+The application can be configured using environment variables:
+
+### Required Environment Variables
+
+- `DATABASE_DSN`: PostgreSQL connection string
+- `BASE_URL`: Base URL for the OAuth server (e.g., "http://localhost:8080")
+- `SCOPES_SUPPORTED`: Comma-separated list of supported OAuth scopes (e.g., "openid,profile,email")
+- `MCP_SERVER_URL`: URL of the MCP server to proxy requests to
+
+### Optional Environment Variables
+
+- `GOOGLE_CLIENT_ID`: Google OAuth client ID
+- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret
+- `MICROSOFT_CLIENT_ID`: Microsoft OAuth client ID
+- `MICROSOFT_CLIENT_SECRET`: Microsoft OAuth client secret
+- `ENCRYPTION_KEY`: Base64-encoded 32-byte AES-256 key for encrypting sensitive data
+
+### Example Environment Variables
+
+```bash
+DATABASE_DSN="postgres://oauth_user:oauth_password@localhost:5432/oauth_proxy?sslmode=disable"
+BASE_URL="http://localhost:8080"
+SCOPES_SUPPORTED="openid,profile,email"
+GOOGLE_CLIENT_ID="your-google-client-id"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+MCP_SERVER_URL="http://localhost:3000"
+ENCRYPTION_KEY="base64-encoded-32-byte-aes-256-key"
+```
+
+### Legacy Configuration (YAML)
+
+For backward compatibility, you can still use a `config.yaml` file:
 
 ```yaml
 server:
@@ -73,6 +104,75 @@ providers:
 ```
 
 ## Setup
+
+### Using Docker (Recommended)
+
+1. **Pull the Docker image**:
+
+   ```bash
+   docker pull ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:latest
+   ```
+
+2. **Run with environment variables**:
+
+   ```bash
+   docker run -d \
+     --name oauth-proxy \
+     -p 8080:8080 \
+     -e DATABASE_DSN="postgres://oauth_user:oauth_password@localhost:5432/oauth_proxy?sslmode=disable" \
+     -e BASE_URL="http://localhost:8080" \
+     -e SCOPES_SUPPORTED="openid,profile,email" \
+     -e GOOGLE_CLIENT_ID="your-google-client-id" \
+     -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
+     -e MCP_SERVER_URL="http://localhost:3000" \
+     -e ENCRYPTION_KEY="your-base64-encoded-32-byte-key" \
+     ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:latest
+   ```
+
+### Using Docker Compose
+
+1. **Create a docker-compose.yml file**:
+
+   ```yaml
+   version: "3.8"
+   services:
+     postgres:
+       image: postgres:15
+       environment:
+         POSTGRES_DB: oauth_proxy
+         POSTGRES_USER: oauth_user
+         POSTGRES_PASSWORD: oauth_password
+       volumes:
+         - postgres_data:/var/lib/postgresql/data
+       ports:
+         - "5432:5432"
+
+     oauth-proxy:
+       image: ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:latest
+       environment:
+         DATABASE_DSN: "postgres://oauth_user:oauth_password@postgres:5432/oauth_proxy?sslmode=disable"
+         BASE_URL: "http://localhost:8080"
+         SCOPES_SUPPORTED: "openid,profile,email"
+         GOOGLE_CLIENT_ID: "your-google-client-id"
+         GOOGLE_CLIENT_SECRET: "your-google-client-secret"
+         MCP_SERVER_URL: "http://localhost:3000"
+         ENCRYPTION_KEY: "your-base64-encoded-32-byte-key"
+       ports:
+         - "8080:8080"
+       depends_on:
+         - postgres
+
+   volumes:
+     postgres_data:
+   ```
+
+2. **Start the services**:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+### Local Development
 
 1. **Start PostgreSQL**:
 
@@ -179,6 +279,32 @@ To add a new OAuth provider:
 ### Database Migrations
 
 The database schema is automatically created when the application starts. For production deployments, consider using proper database migration tools.
+
+### Building Docker Images
+
+The project includes a GitHub Actions workflow that automatically builds and pushes Docker images to GitHub Container Registry (GHCR) on:
+
+- Push to `main` or `master` branch
+- Push of tags starting with `v` (e.g., `v1.0.0`)
+- Pull requests to `main` or `master` branch (builds but doesn't push)
+
+#### Manual Build
+
+To build the Docker image locally:
+
+```bash
+docker build -t mcp-oauth-proxy .
+```
+
+#### Using the GitHub Actions Image
+
+The workflow creates images with the following tags:
+
+- `ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:latest` - Latest from main branch
+- `ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:v1.0.0` - Specific version tags
+- `ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:main-abc123` - Branch-specific builds
+
+Replace `YOUR_USERNAME` with your actual GitHub username.
 
 ## License
 

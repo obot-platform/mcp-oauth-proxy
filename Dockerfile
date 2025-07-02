@@ -8,10 +8,10 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 
 # Copy go mod files
-COPY go.mod go.sum ./
+COPY go.mod ./
 
 # Download dependencies
-RUN go mod download
+RUN go mod download && go mod tidy
 
 # Copy source code
 COPY . .
@@ -34,9 +34,6 @@ WORKDIR /app
 
 # Copy binary from builder stage
 COPY --from=builder /app/oauth-proxy .
-
-# Copy configuration
-COPY config.yaml .
 
 # Change ownership to non-root user
 RUN chown -R oauth:oauth /app

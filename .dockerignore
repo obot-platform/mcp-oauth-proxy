@@ -6,18 +6,42 @@
 README.md
 *.md
 
-# IDE files
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
-# Go
+# Logs
+*.log
+
+# Test files
+test_*.sh
 *.test
+
+# Temporary files
+*.tmp
+*.temp
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Config files (since we're using environment variables)
+config.yaml
+config.production.yaml
+
+# Go
 *.out
 go.sum
 
@@ -27,6 +51,3 @@ oauth-proxy
 *.dll
 *.so
 *.dylib
-
-# Test files
-*_test.go
