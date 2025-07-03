@@ -38,29 +38,158 @@ The application can be configured using environment variables:
 ### Required Environment Variables
 
 - `DATABASE_DSN`: PostgreSQL connection string
-- `BASE_URL`: Base URL for the OAuth server (e.g., "http://localhost:8080")
 - `SCOPES_SUPPORTED`: Comma-separated list of supported OAuth scopes (e.g., "openid,profile,email")
 - `MCP_SERVER_URL`: URL of the MCP server to proxy requests to
+- `OAUTH_CLIENT_ID`: OAuth client ID from your OAuth provider
+- `OAUTH_CLIENT_SECRET`: OAuth client secret from your OAuth provider
+- `OAUTH_AUTHORIZE_URL`: Authorization endpoint URL from your OAuth provider
 
 ### Optional Environment Variables
 
-- `GOOGLE_CLIENT_ID`: Google OAuth client ID
-- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret
-- `MICROSOFT_CLIENT_ID`: Microsoft OAuth client ID
-- `MICROSOFT_CLIENT_SECRET`: Microsoft OAuth client secret
 - `ENCRYPTION_KEY`: Base64-encoded 32-byte AES-256 key for encrypting sensitive data
 
 ### Example Environment Variables
 
 ```bash
+# Example for Google OAuth
 DATABASE_DSN="postgres://oauth_user:oauth_password@localhost:5432/oauth_proxy?sslmode=disable"
-BASE_URL="http://localhost:8080"
 SCOPES_SUPPORTED="openid,profile,email"
-GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"
+OAUTH_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
+OAUTH_CLIENT_SECRET="your-google-client-secret"
+OAUTH_AUTHORIZE_URL="https://accounts.google.com"
 MCP_SERVER_URL="http://localhost:3000"
 ENCRYPTION_KEY="base64-encoded-32-byte-aes-256-key"
+
+# Example for Microsoft Azure AD
+# SCOPES_SUPPORTED="openid,profile,email,User.Read"
+# OAUTH_AUTHORIZE_URL="https://login.microsoftonline.com/common/v2.0"
+
+# Example for GitHub
+# SCOPES_SUPPORTED="read:user,user:email"
+# OAUTH_AUTHORIZE_URL="https://github.com/login/oauth"
 ```
+
+## OAuth Provider Setup
+
+### Google OAuth 2.0
+
+1. **Create a Google Cloud Project**:
+
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select an existing one
+
+2. **Enable OAuth 2.0 API**:
+
+   - Go to "APIs & Services" > "Library"
+   - Search for "Google+ API" or "OAuth 2.0" and enable it
+
+3. **Create OAuth 2.0 Credentials**:
+
+   - Go to "APIs & Services" > "Credentials"
+   - Click "Create Credentials" > "OAuth 2.0 Client IDs"
+   - Choose "Web application" as the application type
+   - Add authorized redirect URIs: `http://localhost:8080/callback` (for development)
+   - Note down the Client ID and Client Secret
+
+4. **Environment Variables**:
+   ```bash
+   OAUTH_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
+   OAUTH_CLIENT_SECRET="your-google-client-secret"
+   OAUTH_AUTHORIZE_URL="https://accounts.google.com"
+   SCOPES_SUPPORTED="openid,profile,email"
+   ```
+
+### Microsoft Azure AD
+
+1. **Register an Application**:
+
+   - Go to [Azure Portal](https://portal.azure.com/)
+   - Navigate to "Azure Active Directory" > "App registrations"
+   - Click "New registration"
+   - Enter a name for your application
+   - Set redirect URI to `http://localhost:8080/callback` (for development)
+
+2. **Configure Permissions**:
+
+   - Go to "API permissions"
+   - Add "Microsoft Graph" > "Delegated permissions"
+   - Select: `User.Read`, `openid`, `profile`, `email`
+   - Click "Grant admin consent"
+
+3. **Get Client Credentials**:
+
+   - Go to "Certificates & secrets"
+   - Create a new client secret
+   - Note down the Application (client) ID and the secret value
+
+4. **Environment Variables**:
+   ```bash
+   OAUTH_CLIENT_ID="your-azure-client-id"
+   OAUTH_CLIENT_SECRET="your-azure-client-secret"
+   OAUTH_AUTHORIZE_URL="https://login.microsoftonline.com/common/v2.0"
+   SCOPES_SUPPORTED="openid,profile,email,User.Read"
+   ```
+
+### GitHub OAuth
+
+1. **Create a GitHub OAuth App**:
+
+   - Go to [GitHub Settings](https://github.com/settings/developers)
+   - Click "New OAuth App"
+   - Fill in the application details:
+     - Application name: Your app name
+     - Homepage URL: `http://localhost:8080` (for development)
+     - Authorization callback URL: `http://localhost:8080/callback`
+
+2. **Get Client Credentials**:
+
+   - After creating the app, you'll see the Client ID
+   - Click "Generate a new client secret" to get the Client Secret
+
+3. **Environment Variables**:
+   ```bash
+   OAUTH_CLIENT_ID="your-github-client-id"
+   OAUTH_CLIENT_SECRET="your-github-client-secret"
+   OAUTH_AUTHORIZE_URL="https://github.com/login/oauth"
+   SCOPES_SUPPORTED="read:user,user:email"
+   ```
+
+### Redirect URI Configuration
+
+When configuring your OAuth provider, use these redirect URIs:
+
+- **Development**: `http://localhost:8080/callback`
+- **Production**: `https://yourdomain.com/callback`
+
+The proxy will automatically handle the OAuth flow and redirect users back to your application.
+
+### OAuth Scopes Explained
+
+#### Google OAuth Scopes
+
+- `openid`: Required for OpenID Connect authentication
+- `profile`: Access to user's basic profile information (name, picture)
+- `email`: Access to user's email address
+
+#### Microsoft Azure AD Scopes
+
+- `openid`: Required for OpenID Connect authentication
+- `profile`: Access to user's basic profile information
+- `email`: Access to user's email address
+- `User.Read`: Access to read user's profile and basic information
+
+#### GitHub OAuth Scopes
+
+- `read:user`: Access to read user's profile information
+- `user:email`: Access to read user's email addresses
+
+#### Custom Scopes
+
+You can customize the scopes based on your needs. Common additional scopes include:
+
+- `offline_access`: For refresh tokens (Microsoft)
+- `https://www.googleapis.com/auth/userinfo.profile`: Extended Google profile access
+- `repo`: GitHub repository access (if needed)
 
 ## Setup
 
@@ -107,14 +236,14 @@ ENCRYPTION_KEY="base64-encoded-32-byte-aes-256-key"
          - "5432:5432"
 
      oauth-proxy:
-       image: ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:latest
+       image: ghcr.io/obot-platform/mcp-oauth-proxy:master
        environment:
          DATABASE_DSN: "postgres://oauth_user:oauth_password@postgres:5432/oauth_proxy?sslmode=disable"
-         BASE_URL: "http://localhost:8080"
          SCOPES_SUPPORTED: "openid,profile,email"
-         GOOGLE_CLIENT_ID: "your-google-client-id"
-         GOOGLE_CLIENT_SECRET: "your-google-client-secret"
-         MCP_SERVER_URL: "http://localhost:3000"
+         OAUTH_CLIENT_ID: "your-oauth-client-id"
+         OAUTH_CLIENT_SECRET: "your-oauth-client-secret"
+         OAUTH_AUTHORIZE_URL: "https://your-oauth-provider.com/oauth/authorize"
+         MCP_SERVER_URL: "http://localhost:3000/mcp"
          ENCRYPTION_KEY: "your-base64-encoded-32-byte-key"
        ports:
          - "8080:8080"
@@ -206,24 +335,34 @@ The code is based on the [Cloudflare Workers OAuth Provider](https://github.com/
 - **Rate Limiting**: Built-in rate limiting to prevent abuse
 - **CORS Configuration**: Configurable CORS headers for security
 
-## Provider Support
+## OAuth Provider Support
 
-### Google Provider
+The proxy supports any OAuth 2.0/OpenID Connect provider through automatic endpoint discovery. It will:
 
-Supports Google OAuth 2.0 with the following scopes:
+1. **Discover Endpoints**: Automatically discover OAuth endpoints using well-known paths:
+
+   - `/.well-known/oauth-authorization-server`
+   - `/.well-known/openid-configuration`
+
+2. **Use Discovered Endpoints**: Use the discovered authorization, token, and userinfo endpoints
+
+3. **Fallback**: If discovery fails, use the provided authorization URL with default endpoint assumptions
+
+### Supported Scopes
+
+The proxy supports standard OAuth scopes:
 
 - `openid`
 - `profile`
 - `email`
 
-### Microsoft Provider
+### Configuration
 
-Supports Microsoft OAuth 2.0 with the following scopes:
+Set these environment variables to configure your OAuth provider:
 
-- `openid`
-- `profile`
-- `email`
-- `User.Read`
+- `OAUTH_CLIENT_ID`: Your OAuth client ID
+- `OAUTH_CLIENT_SECRET`: Your OAuth client secret
+- `OAUTH_AUTHORIZE_URL`: The authorization endpoint URL from your provider
 
 ## Development
 
@@ -259,11 +398,8 @@ docker build -t mcp-oauth-proxy .
 
 The workflow creates images with the following tags:
 
-- `ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:latest` - Latest from main branch
-- `ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:v1.0.0` - Specific version tags
-- `ghcr.io/YOUR_USERNAME/mcp-oauth-proxy:main-abc123` - Branch-specific builds
-
-Replace `YOUR_USERNAME` with your actual GitHub username.
+- `ghcr.io/mcp-oauth-proxy/mcp-oauth-proxy:master` - Latest from master branch
+- `ghcr.io/mcp-oauth-proxy/mcp-oauth-proxy:master-abc123` - Branch-specific builds
 
 ## License
 
