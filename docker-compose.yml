@@ -20,7 +20,6 @@ services:
       OAUTH_CLIENT_SECRET: "your-oauth-client-secret"
       OAUTH_AUTHORIZE_URL: "https://your-oauth-provider.com/oauth/authorize"
       MCP_SERVER_URL: "http://localhost:3000/mcp"
-      ENCRYPTION_KEY: "your-base64-encoded-32-byte-key"
     ports:
       - "8080:8080"
     depends_on:
