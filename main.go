@@ -372,18 +372,11 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	providerManager := providers.NewManager()
 	provider := ""
 
-	// Register Google provider
-	if os.Getenv("GOOGLE_CLIENT_ID") != "" && os.Getenv("GOOGLE_CLIENT_SECRET") != "" {
-		googleProvider := providers.NewGoogleProvider()
-		providerManager.RegisterProvider("google", googleProvider)
-		provider = "google"
-	}
-
-	// Register Microsoft provider
-	if os.Getenv("MICROSOFT_CLIENT_ID") != "" && os.Getenv("MICROSOFT_CLIENT_SECRET") != "" {
-		microsoftProvider := providers.NewMicrosoftProvider()
-		providerManager.RegisterProvider("microsoft", microsoftProvider)
-		provider = "microsoft"
+	// Register generic provider
+	if os.Getenv("OAUTH_CLIENT_ID") != "" && os.Getenv("OAUTH_CLIENT_SECRET") != "" && os.Getenv("OAUTH_AUTHORIZE_URL") != "" {
+		genericProvider := providers.NewGenericProvider()
+		providerManager.RegisterProvider("generic", genericProvider)
+		provider = "generic"
 	}
 
 	// Initialize token manager
@@ -552,27 +545,14 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 	}
 
 	// Get the provider's client ID and secret
-	var clientID, clientSecret string
-	switch providerName {
-	case "google":
-		clientID = os.Getenv("GOOGLE_CLIENT_ID")
-		clientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
-	case "microsoft":
-		clientID = os.Getenv("MICROSOFT_CLIENT_ID")
-		clientSecret = os.Getenv("MICROSOFT_CLIENT_SECRET")
-	default:
-		c.JSON(http.StatusBadRequest, OAuthError{
-			Error:            "invalid_request",
-			ErrorDescription: "Unsupported provider",
-		})
-		return
-	}
+	clientID := os.Getenv("OAUTH_CLIENT_ID")
+	clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
 
 	// Check if provider is configured
 	if clientID == "" || clientSecret == "" {
 		c.JSON(http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
-			ErrorDescription: fmt.Sprintf("Provider '%s' not configured", providerName),
+			ErrorDescription: "OAuth provider not configured",
 		})
 		return
 	}
@@ -653,21 +633,8 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	}
 
 	// Get provider credentials
-	var clientID, clientSecret string
-	switch p.provider {
-	case "google":
-		clientID = os.Getenv("GOOGLE_CLIENT_ID")
-		clientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
-	case "microsoft":
-		clientID = os.Getenv("MICROSOFT_CLIENT_ID")
-		clientSecret = os.Getenv("MICROSOFT_CLIENT_SECRET")
-	default:
-		c.JSON(http.StatusBadRequest, OAuthError{
-			Error:            "invalid_request",
-			ErrorDescription: "Unsupported provider",
-		})
-		return
-	}
+	clientID := os.Getenv("OAUTH_CLIENT_ID")
+	clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
 	redirectURI := fmt.Sprintf("%s/callback", os.Getenv("BASE_URL"))
 
 	// Exchange code for tokens

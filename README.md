@@ -62,47 +62,6 @@ MCP_SERVER_URL="http://localhost:3000"
 ENCRYPTION_KEY="base64-encoded-32-byte-aes-256-key"
 ```
 
-### Legacy Configuration (YAML)
-
-For backward compatibility, you can still use a `config.yaml` file:
-
-```yaml
-server:
-  port: 8080
-  host: "0.0.0.0"
-
-database:
-  dsn: "postgres://oauth_user:oauth_password@localhost:5432/oauth_proxy?sslmode=disable"
-
-oauth:
-  issuer_url: "http://localhost:8080"
-  base_url: "http://localhost:8080"
-  service_documentation_url: "https://example.com/docs"
-  scopes_supported:
-    - "openid"
-    - "profile"
-    - "email"
-  resource_name: "MCP Tools"
-  access_token_ttl: 3600 # 1 hour in seconds
-  allow_implicit_flow: false
-
-mcp:
-  server_url: "http://localhost:8080/mcp"
-
-rate_limit:
-  enabled: true
-  window_minutes: 15
-  max_requests: 100
-
-providers:
-  google:
-    client_id: "your-google-client-id"
-    client_secret: "your-google-client-secret"
-  microsoft:
-    client_id: "your-microsoft-client-id"
-    client_secret: "your-microsoft-client-secret"
-```
-
 ## Setup
 
 ### Using Docker (Recommended)
