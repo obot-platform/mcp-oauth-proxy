@@ -1,0 +1,138 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: [1.21, 1.22]
+        postgres-version: [15, 16]
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres-version }}
+        env:
+          POSTGRES_DB: oauth_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Run unit tests
+        run: go test -v -short ./...
+
+      - name: Run integration tests
+        env:
+          TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
+        run: go test -v -run "TestIntegration" ./...
+
+      - name: Run all tests with race detection
+        env:
+          TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
+        run: go test -v -race ./...
+
+      - name: Run tests with coverage
+        env:
+          TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
+        run: go test -v -coverprofile=coverage.out ./...
+
+      - name: Generate coverage report
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Upload coverage report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.go-version }}-${{ matrix.postgres-version }}
+          path: coverage.html
+          retention-days: 30
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run security audit
+        run: go list -json -deps ./... | nancy sleuth
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  benchmarks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: oauth_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run benchmarks
+        env:
+          TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
+        run: go test -v -bench=. -benchmem ./...

@@ -18,7 +18,6 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v3"
 
 	"mcp-oauth-proxy/database"
 	"mcp-oauth-proxy/providers"
@@ -474,7 +473,13 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 	if c.Request.Method == "GET" {
 		params = c.Request.URL.Query()
 	} else {
-		c.Request.ParseForm()
+		if err := c.Request.ParseForm(); err != nil {
+			c.JSON(http.StatusBadRequest, OAuthError{
+				Error:            "invalid_request",
+				ErrorDescription: "Failed to parse form data",
+			})
+			return
+		}
 		params = c.Request.Form
 	}
 
@@ -661,7 +666,14 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	}
 
 	// Create a grant for this user
-	grantID := generateRandomString(16)
+	grantID, err := generateRandomString(16)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, OAuthError{
+			Error:            "server_error",
+			ErrorDescription: "Failed to generate grant ID",
+		})
+		return
+	}
 	now := time.Now().Unix()
 
 	// Prepare sensitive props data
@@ -752,7 +764,15 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	}
 
 	// Generate authorization code
-	authCode := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, generateRandomString(32))
+	randomPart, err := generateRandomString(32)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, OAuthError{
+			Error:            "server_error",
+			ErrorDescription: "Failed to generate authorization code",
+		})
+		return
+	}
+	authCode := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, randomPart)
 
 	// Store the authorization code
 	if err := p.db.StoreAuthCode(authCode, grantID, userInfo.ID); err != nil {
@@ -948,25 +968,21 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
-func generateRandomString(length int) string {
+func generateRandomString(length int) (string, error) {
 	bytes := make([]byte, length)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)[:length]
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("failed to generate random string: %w", err)
+	}
+	return base64.URLEncoding.EncodeToString(bytes)[:length], nil
 }
 
-func loadConfig(filename string) (*Config, error) {
-	data, err := os.ReadFile(filename)
+// generateRandomStringSafe is a helper that panics on error for cases where we can't handle errors gracefully
+func generateRandomStringSafe(length int) string {
+	str, err := generateRandomString(length)
 	if err != nil {
-		return nil, err
+		panic(fmt.Sprintf("failed to generate random string: %v", err))
 	}
-
-	var config Config
-	err = yaml.Unmarshal(data, &config)
-	if err != nil {
-		return nil, err
-	}
-
-	return &config, nil
+	return str
 }
 
 func main() {
@@ -974,7 +990,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create OAuth proxy: %v", err)
 	}
-	defer proxy.db.Close()
+	defer func() {
+		if err := proxy.db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 
 	// Setup cleanup goroutine for expired tokens
 	go func() {
@@ -1173,11 +1193,11 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 	// For simple string token generation, we don't need to decrypt them here
 
 	// Generate access token in format: userId:grantId:accessTokenSecret
-	accessTokenSecret := generateRandomString(32)
+	accessTokenSecret := generateRandomStringSafe(32)
 	accessToken := fmt.Sprintf("%s:%s:%s", userID, grantID, accessTokenSecret)
 
 	// Generate refresh token in format: userId:grantId:refreshTokenSecret
-	refreshTokenSecret := generateRandomString(32)
+	refreshTokenSecret := generateRandomStringSafe(32)
 	refreshToken := fmt.Sprintf("%s:%s:%s", userID, grantID, refreshTokenSecret)
 
 	// Store tokens in database
@@ -1202,7 +1222,9 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 	}
 
 	// Delete the authorization code (single-use)
-	p.db.DeleteAuthCode(code)
+	if err := p.db.DeleteAuthCode(code); err != nil {
+		log.Printf("Error deleting authorization code: %v", err)
+	}
 
 	response := TokenResponse{
 		AccessToken:  accessToken,
@@ -1269,11 +1291,11 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 	// For simple string token generation, we don't need to decrypt them here
 
 	// Generate new access token in format: userId:grantId:accessTokenSecret
-	accessTokenSecret := generateRandomString(32)
+	accessTokenSecret := generateRandomStringSafe(32)
 	accessToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, accessTokenSecret)
 
 	// Generate new refresh token in format: userId:grantId:refreshTokenSecret (OAuth 2.1 refresh token rotation)
-	refreshTokenSecret := generateRandomString(32)
+	refreshTokenSecret := generateRandomStringSafe(32)
 	newRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
 
 	// Store new token in database (replaces the old one)
@@ -1462,12 +1484,12 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 	}
 
 	// Generate client ID and secret
-	clientID := generateRandomString(16)
+	clientID := generateRandomStringSafe(16)
 	var clientSecret string
 
 	// Generate client secret for confidential clients
 	if clientInfo.TokenEndpointAuthMethod != "none" {
-		clientSecret = generateRandomString(32)
+		clientSecret = generateRandomStringSafe(32)
 	}
 
 	// Set registration date
