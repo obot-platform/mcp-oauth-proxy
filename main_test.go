@@ -201,6 +201,7 @@ func TestOAuthMetadataEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 
 	w := httptest.NewRecorder()
 	ts.router.ServeHTTP(w, req)
@@ -225,6 +226,7 @@ func TestProtectedResourceMetadataEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "/.well-known/oauth-protected-resource", nil)
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 
 	w := httptest.NewRecorder()
 	ts.router.ServeHTTP(w, req)
@@ -267,6 +269,7 @@ func TestAuthorizationEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "/oauth/authorize?"+params.Encode(), nil)
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 
 	w := httptest.NewRecorder()
 	ts.router.ServeHTTP(w, req)
@@ -312,6 +315,7 @@ func TestAuthorizationEndpointWithPKCE(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "/oauth/authorize?"+params.Encode(), nil)
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 
 	w := httptest.NewRecorder()
 	ts.router.ServeHTTP(w, req)
@@ -425,6 +429,7 @@ func TestTokenEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("POST", "/oauth/token", strings.NewReader(tokenData.Encode()))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("test_client_token:test_secret")))
 
@@ -495,6 +500,7 @@ func TestTokenEndpointWithPKCE(t *testing.T) {
 
 	req, err := http.NewRequest("POST", "/oauth/token", strings.NewReader(tokenData.Encode()))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("test_client_pkce_token:test_secret")))
 
@@ -551,6 +557,7 @@ func TestRefreshTokenEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("POST", "/oauth/token", strings.NewReader(refreshData.Encode()))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("test_client_refresh:test_secret")))
 
@@ -608,6 +615,7 @@ func TestRevokeEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("POST", "/oauth/revoke", strings.NewReader(revokeData.Encode()))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("test_client_revoke:test_secret")))
 
@@ -641,6 +649,7 @@ func TestRegisterEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest("POST", "/oauth/register", bytes.NewBuffer(jsonData))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -681,6 +690,7 @@ func TestMCPProxyEndpoint(t *testing.T) {
 	// Test MCP proxy request with valid token
 	req, err := http.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc": "2.0", "method": "test", "params": {}}`))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer test_access_token_mcp_123")
 
@@ -700,6 +710,7 @@ func TestMCPProxyEndpointUnauthorized(t *testing.T) {
 	// Test MCP proxy request without token
 	req, err := http.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc": "2.0", "method": "test", "params": {}}`))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -717,6 +728,7 @@ func TestRateLimiting(t *testing.T) {
 	for i := 0; i < 105; i++ {
 		req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
 		require.NoError(t, err)
+		req.Host = "test.example.com"
 
 		w := httptest.NewRecorder()
 		ts.router.ServeHTTP(w, req)
@@ -819,6 +831,7 @@ func TestIntegrationFlow(t *testing.T) {
 
 	req, err := http.NewRequest("POST", "/oauth/register", bytes.NewBuffer(jsonData))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -874,6 +887,7 @@ func TestIntegrationFlow(t *testing.T) {
 
 	req, err = http.NewRequest("POST", "/oauth/token", strings.NewReader(tokenData.Encode()))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(clientInfo.ClientID+":"+clientInfo.ClientSecret)))
 
@@ -892,6 +906,7 @@ func TestIntegrationFlow(t *testing.T) {
 	// Step 5: Use access token to access protected resource
 	req, err = http.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc": "2.0", "method": "test", "params": {}}`))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+tokenResponse.AccessToken)
 
@@ -907,6 +922,7 @@ func TestIntegrationFlow(t *testing.T) {
 
 	req, err = http.NewRequest("POST", "/oauth/token", strings.NewReader(refreshData.Encode()))
 	require.NoError(t, err)
+	req.Host = "test.example.com"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(clientInfo.ClientID+":"+clientInfo.ClientSecret)))
 
