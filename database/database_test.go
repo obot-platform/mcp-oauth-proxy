@@ -1,6 +1,8 @@
 package database
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -130,21 +132,37 @@ func testGrantOperations(t *testing.T, db *Database) {
 	assert.Error(t, err)
 }
 
+func generateRandomString(length int) (string, error) {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(b), nil
+}
 func testTokenOperations(t *testing.T, db *Database) {
+	grantID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	refreshTokenData, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	accessTokenData, err := generateRandomString(16)
+	require.NoError(t, err)
+
 	// Test storing token
 	tokenData := &TokenData{
-		AccessToken:  "test_access_token_db_123",
-		RefreshToken: "test_refresh_token_db_123",
+		AccessToken:  accessTokenData,
+		RefreshToken: refreshTokenData,
 		ClientID:     "test_client_db",
 		UserID:       "test_user_123",
-		GrantID:      "test_grant_db_123",
+		GrantID:      grantID,
 		Scope:        "read write admin",
 		ExpiresAt:    time.Now().Add(1 * time.Hour),
 		CreatedAt:    time.Now(),
 		Revoked:      false,
 	}
 
-	err := db.StoreToken(tokenData)
+	err = db.StoreToken(tokenData)
 	require.NoError(t, err)
 
 	// Test retrieving token
@@ -159,28 +177,29 @@ func testTokenOperations(t *testing.T, db *Database) {
 	assert.False(t, retrievedToken.Revoked)
 
 	// Test retrieving token by refresh token
-	refreshToken, err := db.GetTokenByRefreshToken("test_refresh_token_db_123")
+	refreshToken, err := db.GetTokenByRefreshToken(refreshTokenData)
 	require.NoError(t, err)
 	assert.Equal(t, tokenData.AccessToken, refreshToken.AccessToken)
 	assert.Equal(t, tokenData.RefreshToken, refreshToken.RefreshToken)
 
 	// Test revoking token
-	err = db.RevokeToken("test_access_token_db_123")
+	err = db.RevokeToken(accessTokenData)
 	require.NoError(t, err)
 
-	revokedToken, err := db.GetToken("test_access_token_db_123")
+	revokedToken, err := db.GetToken(accessTokenData)
 	require.NoError(t, err)
 	assert.True(t, revokedToken.Revoked)
 	assert.NotNil(t, revokedToken.RevokedAt)
 
 	// Test updating refresh token
-	newRefreshToken := "new_refresh_token_123"
-	err = db.UpdateTokenRefreshToken("test_access_token_db_123", newRefreshToken)
+	newRefreshTokenData, err := generateRandomString(16)
+	require.NoError(t, err)
+	err = db.UpdateTokenRefreshToken(accessTokenData, newRefreshTokenData)
 	require.NoError(t, err)
 
-	updatedToken, err := db.GetToken("test_access_token_db_123")
+	updatedToken, err := db.GetToken(accessTokenData)
 	require.NoError(t, err)
-	assert.Equal(t, newRefreshToken, updatedToken.RefreshToken)
+	assert.Equal(t, newRefreshTokenData, updatedToken.RefreshToken)
 
 	// Test retrieving non-existent token
 	_, err = db.GetToken("non_existent_token")
