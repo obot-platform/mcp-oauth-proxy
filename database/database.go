@@ -453,9 +453,10 @@ func (d *Database) GetTokenByRefreshToken(refreshToken string) (*TokenData, erro
 
 // RevokeToken revokes an access token
 func (d *Database) RevokeToken(token string) error {
+	hashedToken := hashToken(token)
 	// First try to revoke as access token
 	query := `UPDATE access_tokens SET revoked = TRUE, revoked_at = NOW() WHERE access_token = $1`
-	result, err := d.db.Exec(query, token)
+	result, err := d.db.Exec(query, hashedToken)
 	if err != nil {
 		return err
 	}
@@ -466,7 +467,6 @@ func (d *Database) RevokeToken(token string) error {
 	}
 
 	// If not found as access token, try as refresh token (hash it first)
-	hashedToken := hashToken(token)
 	query = `UPDATE access_tokens SET revoked = TRUE, revoked_at = NOW() WHERE refresh_token = $1`
 	_, err = d.db.Exec(query, hashedToken)
 	return err
