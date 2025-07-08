@@ -102,9 +102,16 @@ func setupTestSuite(t *testing.T) *TestSuite {
 	// Set Gin to test mode
 	gin.SetMode(gin.TestMode)
 
-	os.Setenv("OAUTH_CLIENT_ID", "test_client")
-	os.Setenv("OAUTH_CLIENT_SECRET", "test_secret")
-	os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
+	// Set environment variables for testing
+	if err := os.Setenv("OAUTH_CLIENT_ID", "test_client"); err != nil {
+		t.Logf("Failed to set OAUTH_CLIENT_ID: %v", err)
+	}
+	if err := os.Setenv("OAUTH_CLIENT_SECRET", "test_secret"); err != nil {
+		t.Logf("Failed to set OAUTH_CLIENT_SECRET: %v", err)
+	}
+	if err := os.Setenv("MCP_SERVER_URL", "http://localhost:8081"); err != nil {
+		t.Logf("Failed to set MCP_SERVER_URL: %v", err)
+	}
 
 	// Create test database (in-memory SQLite would be better for tests)
 	// For now, we'll use a test PostgreSQL instance
@@ -674,10 +681,6 @@ func (r *TestResponseRecorder) CloseNotify() <-chan bool {
 	return r.closeChannel
 }
 
-func (r *TestResponseRecorder) closeClient() {
-	r.closeChannel <- true
-}
-
 func CreateTestResponseRecorder() *TestResponseRecorder {
 	return &TestResponseRecorder{
 		httptest.NewRecorder(),
@@ -702,7 +705,9 @@ func TestMCPProxyEndpoint(t *testing.T) {
 			// Return a mock MCP response
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"jsonrpc": "2.0", "result": "success", "id": 1}`))
+			if _, err := w.Write([]byte(`{"jsonrpc": "2.0", "result": "success", "id": 1}`)); err != nil {
+				t.Logf("Failed to write response: %v", err)
+			}
 		}),
 	}
 
@@ -720,7 +725,9 @@ func TestMCPProxyEndpoint(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		mcpServer.Shutdown(ctx)
+		if err := mcpServer.Shutdown(ctx); err != nil {
+			t.Logf("Failed to shutdown MCP server: %v", err)
+		}
 	}()
 
 	// create a random grant ID
@@ -891,7 +898,9 @@ func TestIntegrationFlow(t *testing.T) {
 			// Return a mock MCP response
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"jsonrpc": "2.0", "result": "success", "id": 1}`))
+			if _, err := w.Write([]byte(`{"jsonrpc": "2.0", "result": "success", "id": 1}`)); err != nil {
+				t.Logf("Failed to write response: %v", err)
+			}
 		}),
 	}
 
@@ -909,7 +918,9 @@ func TestIntegrationFlow(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		mcpServer.Shutdown(ctx)
+		if err := mcpServer.Shutdown(ctx); err != nil {
+			t.Logf("Failed to shutdown MCP server: %v", err)
+		}
 	}()
 
 	// Step 1: Register a client
