@@ -6,14 +6,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Database represents the database connection and operations
 type Database struct {
-	db *sql.DB
+	db     *sql.DB
+	dbType string // "postgres" or "sqlite"
 }
 
 // TokenData represents stored token data for OAuth 2.1 compliance
@@ -64,7 +69,34 @@ type Grant struct {
 
 // NewDatabase creates a new database connection and sets up the schema
 func NewDatabase(dsn string) (*Database, error) {
-	db, err := sql.Open("postgres", dsn)
+	var db *sql.DB
+	var dbType string
+	var err error
+
+	// If DSN is empty, use SQLite with local file
+	if dsn == "" {
+		// Create data directory if it doesn't exist
+		dataDir := "data"
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create data directory: %w", err)
+		}
+
+		// Use local SQLite database
+		sqlitePath := filepath.Join(dataDir, "oauth_proxy.db")
+		db, err = sql.Open("sqlite3", sqlitePath)
+		dbType = "sqlite"
+	} else {
+		// Check if it's a PostgreSQL DSN
+		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+			db, err = sql.Open("postgres", dsn)
+			dbType = "postgres"
+		} else {
+			// Assume SQLite file path
+			db, err = sql.Open("sqlite3", dsn)
+			dbType = "sqlite"
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -74,7 +106,7 @@ func NewDatabase(dsn string) (*Database, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	database := &Database{db: db}
+	database := &Database{db: db, dbType: dbType}
 
 	// Setup schema
 	if err := database.setupSchema(); err != nil {
@@ -86,65 +118,131 @@ func NewDatabase(dsn string) (*Database, error) {
 
 // setupSchema creates the necessary tables
 func (d *Database) setupSchema() error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS clients (
-			client_id VARCHAR(255) PRIMARY KEY,
-			client_secret VARCHAR(255),
-			redirect_uris JSONB NOT NULL,
-			client_name VARCHAR(255),
-			logo_uri VARCHAR(500),
-			client_uri VARCHAR(500),
-			policy_uri VARCHAR(500),
-			tos_uri VARCHAR(500),
-			jwks_uri VARCHAR(500),
-			contacts JSONB,
-			grant_types JSONB,
-			response_types JSONB,
-			registration_date BIGINT,
-			token_endpoint_auth_method VARCHAR(50) DEFAULT 'client_secret_basic'
-		)`,
+	var queries []string
 
-		`CREATE TABLE IF NOT EXISTS grants (
-			id VARCHAR(255) PRIMARY KEY,
-			client_id VARCHAR(255) NOT NULL,
-			user_id VARCHAR(255) NOT NULL,
-			scope JSONB NOT NULL,
-			metadata JSONB,
-			props JSONB,
-			created_at BIGINT NOT NULL,
-			expires_at BIGINT NOT NULL,
-			code_challenge VARCHAR(255),
-			code_challenge_method VARCHAR(10)
-		)`,
+	if d.dbType == "postgres" {
+		queries = []string{
+			`CREATE TABLE IF NOT EXISTS clients (
+				client_id VARCHAR(255) PRIMARY KEY,
+				client_secret VARCHAR(255),
+				redirect_uris JSONB NOT NULL,
+				client_name VARCHAR(255),
+				logo_uri VARCHAR(500),
+				client_uri VARCHAR(500),
+				policy_uri VARCHAR(500),
+				tos_uri VARCHAR(500),
+				jwks_uri VARCHAR(500),
+				contacts JSONB,
+				grant_types JSONB,
+				response_types JSONB,
+				registration_date BIGINT,
+				token_endpoint_auth_method VARCHAR(50) DEFAULT 'client_secret_basic'
+			)`,
 
-		`CREATE TABLE IF NOT EXISTS authorization_codes (
-			code VARCHAR(255) PRIMARY KEY,
-			grant_id VARCHAR(255) NOT NULL,
-			user_id VARCHAR(255) NOT NULL,
-			expires_at TIMESTAMPTZ NOT NULL,
-			FOREIGN KEY (grant_id) REFERENCES grants(id) ON DELETE CASCADE
-		)`,
+			`CREATE TABLE IF NOT EXISTS grants (
+				id VARCHAR(255) PRIMARY KEY,
+				client_id VARCHAR(255) NOT NULL,
+				user_id VARCHAR(255) NOT NULL,
+				scope JSONB NOT NULL,
+				metadata JSONB,
+				props JSONB,
+				created_at BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL,
+				code_challenge VARCHAR(255),
+				code_challenge_method VARCHAR(10)
+			)`,
 
-		`CREATE TABLE IF NOT EXISTS access_tokens (
-			access_token VARCHAR(255) PRIMARY KEY,
-			refresh_token VARCHAR(255) UNIQUE,
-			client_id VARCHAR(255) NOT NULL,
-			user_id VARCHAR(255) NOT NULL,
-			grant_id VARCHAR(255) NOT NULL,
-			scope TEXT,
-			expires_at TIMESTAMPTZ NOT NULL,
-			created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-			revoked BOOLEAN DEFAULT FALSE,
-			revoked_at TIMESTAMPTZ,
-			FOREIGN KEY (grant_id) REFERENCES grants(id) ON DELETE CASCADE
-		)`,
+			`CREATE TABLE IF NOT EXISTS authorization_codes (
+				code VARCHAR(255) PRIMARY KEY,
+				grant_id VARCHAR(255) NOT NULL,
+				user_id VARCHAR(255) NOT NULL,
+				expires_at TIMESTAMPTZ NOT NULL,
+				FOREIGN KEY (grant_id) REFERENCES grants(id) ON DELETE CASCADE
+			)`,
 
-		`CREATE INDEX IF NOT EXISTS idx_access_tokens_client_id ON access_tokens(client_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_access_tokens_expires_at ON access_tokens(expires_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_access_tokens_revoked ON access_tokens(revoked)`,
-		`CREATE INDEX IF NOT EXISTS idx_grants_user_id ON grants(user_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_grants_client_id ON grants(client_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_authorization_codes_expires_at ON authorization_codes(expires_at)`,
+			`CREATE TABLE IF NOT EXISTS access_tokens (
+				access_token VARCHAR(255) PRIMARY KEY,
+				refresh_token VARCHAR(255) UNIQUE,
+				client_id VARCHAR(255) NOT NULL,
+				user_id VARCHAR(255) NOT NULL,
+				grant_id VARCHAR(255) NOT NULL,
+				scope TEXT,
+				expires_at TIMESTAMPTZ NOT NULL,
+				created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+				revoked BOOLEAN DEFAULT FALSE,
+				revoked_at TIMESTAMPTZ,
+				FOREIGN KEY (grant_id) REFERENCES grants(id) ON DELETE CASCADE
+			)`,
+
+			`CREATE INDEX IF NOT EXISTS idx_access_tokens_client_id ON access_tokens(client_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_access_tokens_expires_at ON access_tokens(expires_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_access_tokens_revoked ON access_tokens(revoked)`,
+			`CREATE INDEX IF NOT EXISTS idx_grants_user_id ON grants(user_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_grants_client_id ON grants(client_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_authorization_codes_expires_at ON authorization_codes(expires_at)`,
+		}
+	} else {
+		// SQLite schema
+		queries = []string{
+			`CREATE TABLE IF NOT EXISTS clients (
+				client_id TEXT PRIMARY KEY,
+				client_secret TEXT,
+				redirect_uris TEXT NOT NULL,
+				client_name TEXT,
+				logo_uri TEXT,
+				client_uri TEXT,
+				policy_uri TEXT,
+				tos_uri TEXT,
+				jwks_uri TEXT,
+				contacts TEXT,
+				grant_types TEXT,
+				response_types TEXT,
+				registration_date INTEGER,
+				token_endpoint_auth_method TEXT DEFAULT 'client_secret_basic'
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS grants (
+				id TEXT PRIMARY KEY,
+				client_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				scope TEXT NOT NULL,
+				metadata TEXT,
+				props TEXT,
+				created_at INTEGER NOT NULL,
+				expires_at INTEGER NOT NULL,
+				code_challenge TEXT,
+				code_challenge_method TEXT
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS authorization_codes (
+				code TEXT PRIMARY KEY,
+				grant_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				expires_at DATETIME NOT NULL,
+				FOREIGN KEY (grant_id) REFERENCES grants(id) ON DELETE CASCADE
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS access_tokens (
+				access_token TEXT PRIMARY KEY,
+				refresh_token TEXT UNIQUE,
+				client_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				grant_id TEXT NOT NULL,
+				scope TEXT,
+				expires_at DATETIME NOT NULL,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				revoked INTEGER DEFAULT 0,
+				revoked_at DATETIME,
+				FOREIGN KEY (grant_id) REFERENCES grants(id) ON DELETE CASCADE
+			)`,
+
+			`CREATE INDEX IF NOT EXISTS idx_access_tokens_client_id ON access_tokens(client_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_access_tokens_expires_at ON access_tokens(expires_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_access_tokens_revoked ON access_tokens(revoked)`,
+			`CREATE INDEX IF NOT EXISTS idx_grants_user_id ON grants(user_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_grants_client_id ON grants(client_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_authorization_codes_expires_at ON authorization_codes(expires_at)`,
+		}
 	}
 
 	for _, query := range queries {
@@ -158,12 +256,22 @@ func (d *Database) setupSchema() error {
 
 // GetClient retrieves a client by ID
 func (d *Database) GetClient(clientID string) (*ClientInfo, error) {
-	query := `
-		SELECT client_id, client_secret, redirect_uris, client_name, logo_uri, client_uri, 
-		       policy_uri, tos_uri, jwks_uri, contacts, grant_types, response_types, 
-		       registration_date, token_endpoint_auth_method
-		FROM clients WHERE client_id = $1
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			SELECT client_id, client_secret, redirect_uris, client_name, logo_uri, client_uri, 
+			       policy_uri, tos_uri, jwks_uri, contacts, grant_types, response_types, 
+			       registration_date, token_endpoint_auth_method
+			FROM clients WHERE client_id = $1
+		`
+	} else {
+		query = `
+			SELECT client_id, client_secret, redirect_uris, client_name, logo_uri, client_uri, 
+			       policy_uri, tos_uri, jwks_uri, contacts, grant_types, response_types, 
+			       registration_date, token_endpoint_auth_method
+			FROM clients WHERE client_id = ?
+		`
+	}
 
 	var client ClientInfo
 	var redirectUris, contacts, grantTypes, responseTypes []byte
@@ -218,12 +326,22 @@ func (d *Database) GetClient(clientID string) (*ClientInfo, error) {
 
 // StoreClient stores a new client
 func (d *Database) StoreClient(client *ClientInfo) error {
-	query := `
-		INSERT INTO clients (client_id, client_secret, redirect_uris, client_name, logo_uri, 
-		                    client_uri, policy_uri, tos_uri, jwks_uri, contacts, grant_types, 
-		                    response_types, registration_date, token_endpoint_auth_method)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			INSERT INTO clients (client_id, client_secret, redirect_uris, client_name, logo_uri, 
+			                    client_uri, policy_uri, tos_uri, jwks_uri, contacts, grant_types, 
+			                    response_types, registration_date, token_endpoint_auth_method)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		`
+	} else {
+		query = `
+			INSERT INTO clients (client_id, client_secret, redirect_uris, client_name, logo_uri, 
+			                    client_uri, policy_uri, tos_uri, jwks_uri, contacts, grant_types, 
+			                    response_types, registration_date, token_endpoint_auth_method)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`
+	}
 
 	redirectUris, _ := json.Marshal(client.RedirectUris)
 	contacts, _ := json.Marshal(client.Contacts)
@@ -252,10 +370,18 @@ func (d *Database) StoreClient(client *ClientInfo) error {
 
 // StoreGrant stores a new grant
 func (d *Database) StoreGrant(grant *Grant) error {
-	query := `
-		INSERT INTO grants (id, client_id, user_id, scope, metadata, props, created_at, expires_at, code_challenge, code_challenge_method)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			INSERT INTO grants (id, client_id, user_id, scope, metadata, props, created_at, expires_at, code_challenge, code_challenge_method)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`
+	} else {
+		query = `
+			INSERT INTO grants (id, client_id, user_id, scope, metadata, props, created_at, expires_at, code_challenge, code_challenge_method)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`
+	}
 
 	scope, _ := json.Marshal(grant.Scope)
 	metadata, _ := json.Marshal(grant.Metadata)
@@ -279,10 +405,18 @@ func (d *Database) StoreGrant(grant *Grant) error {
 
 // GetGrant retrieves a grant by ID and user ID
 func (d *Database) GetGrant(grantID, userID string) (*Grant, error) {
-	query := `
-		SELECT id, client_id, user_id, scope, metadata, props, created_at, expires_at, code_challenge, code_challenge_method
-		FROM grants WHERE id = $1 AND user_id = $2
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			SELECT id, client_id, user_id, scope, metadata, props, created_at, expires_at, code_challenge, code_challenge_method
+			FROM grants WHERE id = $1 AND user_id = $2
+		`
+	} else {
+		query = `
+			SELECT id, client_id, user_id, scope, metadata, props, created_at, expires_at, code_challenge, code_challenge_method
+			FROM grants WHERE id = ? AND user_id = ?
+		`
+	}
 
 	var grant Grant
 	var scope, metadata, props []byte
@@ -324,10 +458,18 @@ func (d *Database) GetGrant(grantID, userID string) (*Grant, error) {
 
 // StoreAuthCode stores an authorization code
 func (d *Database) StoreAuthCode(code, grantID, userID string) error {
-	query := `
-		INSERT INTO authorization_codes (code, grant_id, user_id, expires_at)
-		VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			INSERT INTO authorization_codes (code, grant_id, user_id, expires_at)
+			VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')
+		`
+	} else {
+		query = `
+			INSERT INTO authorization_codes (code, grant_id, user_id, expires_at)
+			VALUES (?, ?, ?, datetime('now', '+10 minutes'))
+		`
+	}
 
 	_, err := d.db.Exec(query, code, grantID, userID)
 	return err
@@ -335,10 +477,18 @@ func (d *Database) StoreAuthCode(code, grantID, userID string) error {
 
 // ValidateAuthCode validates an authorization code and returns grant info
 func (d *Database) ValidateAuthCode(code string) (string, string, error) {
-	query := `
-		SELECT grant_id, user_id FROM authorization_codes 
-		WHERE code = $1 AND expires_at > NOW()
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			SELECT grant_id, user_id FROM authorization_codes 
+			WHERE code = $1 AND expires_at > NOW()
+		`
+	} else {
+		query = `
+			SELECT grant_id, user_id FROM authorization_codes 
+			WHERE code = ? AND expires_at > datetime('now')
+		`
+	}
 
 	var grantID, userID string
 	err := d.db.QueryRow(query, code).Scan(&grantID, &userID)
@@ -351,7 +501,12 @@ func (d *Database) ValidateAuthCode(code string) (string, string, error) {
 
 // DeleteAuthCode deletes an authorization code (single-use)
 func (d *Database) DeleteAuthCode(code string) error {
-	query := `DELETE FROM authorization_codes WHERE code = $1`
+	var query string
+	if d.dbType == "postgres" {
+		query = `DELETE FROM authorization_codes WHERE code = $1`
+	} else {
+		query = `DELETE FROM authorization_codes WHERE code = ?`
+	}
 	_, err := d.db.Exec(query, code)
 	return err
 }
@@ -364,10 +519,18 @@ func hashToken(token string) string {
 
 // StoreToken stores an access token and refresh token
 func (d *Database) StoreToken(data *TokenData) error {
-	query := `
-		INSERT INTO access_tokens (access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			INSERT INTO access_tokens (access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`
+	} else {
+		query = `
+			INSERT INTO access_tokens (access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`
+	}
 
 	// Hash the refresh token for secure storage
 	hashedAccessToken := hashToken(data.AccessToken)
@@ -379,10 +542,18 @@ func (d *Database) StoreToken(data *TokenData) error {
 
 // GetToken retrieves a token by access token
 func (d *Database) GetToken(accessToken string) (*TokenData, error) {
-	query := `
-		SELECT access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at, created_at, revoked, revoked_at
-		FROM access_tokens WHERE access_token = $1
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			SELECT access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at, created_at, revoked, revoked_at
+			FROM access_tokens WHERE access_token = $1
+		`
+	} else {
+		query = `
+			SELECT access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at, created_at, revoked, revoked_at
+			FROM access_tokens WHERE access_token = ?
+		`
+	}
 
 	hashedAccessToken := hashToken(accessToken)
 
@@ -414,10 +585,18 @@ func (d *Database) GetToken(accessToken string) (*TokenData, error) {
 
 // GetTokenByRefreshToken retrieves a token by refresh token
 func (d *Database) GetTokenByRefreshToken(refreshToken string) (*TokenData, error) {
-	query := `
-		SELECT access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at, created_at, revoked, revoked_at
-		FROM access_tokens WHERE refresh_token = $1
-	`
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			SELECT access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at, created_at, revoked, revoked_at
+			FROM access_tokens WHERE refresh_token = $1
+		`
+	} else {
+		query = `
+			SELECT access_token, refresh_token, client_id, user_id, grant_id, scope, expires_at, created_at, revoked, revoked_at
+			FROM access_tokens WHERE refresh_token = ?
+		`
+	}
 
 	// Hash the refresh token for lookup
 	hashedRefreshToken := hashToken(refreshToken)
@@ -454,8 +633,16 @@ func (d *Database) GetTokenByRefreshToken(refreshToken string) (*TokenData, erro
 // RevokeToken revokes an access token
 func (d *Database) RevokeToken(token string) error {
 	hashedToken := hashToken(token)
-	// First try to revoke as access token
-	query := `UPDATE access_tokens SET revoked = TRUE, revoked_at = NOW() WHERE access_token = $1`
+
+	var query string
+	if d.dbType == "postgres" {
+		// First try to revoke as access token
+		query = `UPDATE access_tokens SET revoked = TRUE, revoked_at = NOW() WHERE access_token = $1`
+	} else {
+		// First try to revoke as access token
+		query = `UPDATE access_tokens SET revoked = 1, revoked_at = datetime('now') WHERE access_token = ?`
+	}
+
 	result, err := d.db.Exec(query, hashedToken)
 	if err != nil {
 		return err
@@ -467,17 +654,25 @@ func (d *Database) RevokeToken(token string) error {
 	}
 
 	// If not found as access token, try as refresh token (hash it first)
-	query = `UPDATE access_tokens SET revoked = TRUE, revoked_at = NOW() WHERE refresh_token = $1`
+	if d.dbType == "postgres" {
+		query = `UPDATE access_tokens SET revoked = TRUE, revoked_at = NOW() WHERE refresh_token = $1`
+	} else {
+		query = `UPDATE access_tokens SET revoked = 1, revoked_at = datetime('now') WHERE refresh_token = ?`
+	}
 	_, err = d.db.Exec(query, hashedToken)
 	return err
 }
 
 // UpdateTokenRefreshToken updates the refresh token for an existing token
 func (d *Database) UpdateTokenRefreshToken(accessToken, newRefreshToken string) error {
-	query := `UPDATE access_tokens SET refresh_token = $1 WHERE access_token = $2`
+	var query string
+	if d.dbType == "postgres" {
+		query = `UPDATE access_tokens SET refresh_token = $1 WHERE access_token = $2`
+	} else {
+		query = `UPDATE access_tokens SET refresh_token = ? WHERE access_token = ?`
+	}
 
 	hashedAccessToken := hashToken(accessToken)
-
 	hashedNewRefreshToken := hashToken(newRefreshToken)
 
 	_, err := d.db.Exec(query, hashedNewRefreshToken, hashedAccessToken)
@@ -486,10 +681,20 @@ func (d *Database) UpdateTokenRefreshToken(accessToken, newRefreshToken string) 
 
 // CleanupExpiredTokens removes expired tokens and authorization codes
 func (d *Database) CleanupExpiredTokens() error {
-	queries := []string{
-		`DELETE FROM access_tokens WHERE expires_at < NOW() OR revoked = TRUE`,
-		`DELETE FROM authorization_codes WHERE expires_at < NOW()`,
-		`DELETE FROM grants WHERE expires_at < EXTRACT(EPOCH FROM NOW())`,
+	var queries []string
+
+	if d.dbType == "postgres" {
+		queries = []string{
+			`DELETE FROM access_tokens WHERE expires_at < NOW() OR revoked = TRUE`,
+			`DELETE FROM authorization_codes WHERE expires_at < NOW()`,
+			`DELETE FROM grants WHERE expires_at < EXTRACT(EPOCH FROM NOW())`,
+		}
+	} else {
+		queries = []string{
+			`DELETE FROM access_tokens WHERE expires_at < datetime('now') OR revoked = 1`,
+			`DELETE FROM authorization_codes WHERE expires_at < datetime('now')`,
+			`DELETE FROM grants WHERE expires_at < strftime('%s', 'now')`,
+		}
 	}
 
 	for _, query := range queries {

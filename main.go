@@ -354,6 +354,16 @@ type OAuthProxy struct {
 
 func NewOAuthProxy() (*OAuthProxy, error) {
 	databaseDSN := os.Getenv("DATABASE_DSN")
+
+	// Log database configuration
+	if databaseDSN == "" {
+		log.Println("DATABASE_DSN not set, using SQLite database at data/oauth_proxy.db")
+	} else if strings.HasPrefix(databaseDSN, "postgres://") || strings.HasPrefix(databaseDSN, "postgresql://") {
+		log.Println("Using PostgreSQL database")
+	} else {
+		log.Printf("Using SQLite database at: %s", databaseDSN)
+	}
+
 	// Initialize database
 	db, err := database.NewDatabase(databaseDSN)
 	if err != nil {

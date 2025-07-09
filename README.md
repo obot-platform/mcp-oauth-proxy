@@ -15,16 +15,35 @@ A comprehensive OAuth 2.1 proxy server implemented in Go that provides OAuth aut
 
 ## Architecture
 
-The OAuth proxy follows the Cloudflare Workers OAuth Provider pattern but is implemented in Go with PostgreSQL storage:
+The OAuth proxy follows the Cloudflare Workers OAuth Provider pattern but is implemented in Go with database storage:
 
 - **Authorization Flow**: Clients request authorization, users approve, and authorization codes are generated
 - **Token Exchange**: Authorization codes are exchanged for access and refresh tokens
 - **Token Validation**: JWT tokens are validated and user properties are extracted
 - **MCP Proxying**: Requests to MCP endpoints are proxied with user context headers
 
+## Database Support
+
+The proxy supports both PostgreSQL and SQLite databases:
+
+### PostgreSQL (Recommended for Production)
+
+- Full ACID compliance
+- Better concurrent access
+- Advanced features like JSONB for metadata storage
+- Set `DATABASE_DSN="postgres://user:pass@host:port/dbname?sslmode=disable"`
+
+### SQLite (Default for Development)
+
+- Zero configuration
+- Single file storage
+- Perfect for development and small deployments
+- Automatically used when `DATABASE_DSN` is not set
+- Database file stored at `data/oauth_proxy.db`
+
 ## Database Schema
 
-The proxy uses PostgreSQL with the following tables:
+The proxy uses the following tables (compatible with both PostgreSQL and SQLite):
 
 - `clients`: OAuth client registrations
 - `grants`: Authorization grants with user properties
@@ -37,7 +56,6 @@ The application can be configured using environment variables:
 
 ### Required Environment Variables
 
-- `DATABASE_DSN`: PostgreSQL connection string
 - `SCOPES_SUPPORTED`: Comma-separated list of supported OAuth scopes (e.g., "openid,profile,email")
 - `MCP_SERVER_URL`: URL of the MCP server to proxy requests to
 - `OAUTH_CLIENT_ID`: OAuth client ID from your OAuth provider
@@ -46,12 +64,13 @@ The application can be configured using environment variables:
 
 ### Optional Environment Variables
 
+- `DATABASE_DSN`: Database connection string (PostgreSQL or SQLite). If not set, SQLite will be used with a local file at `data/oauth_proxy.db`
 - `ENCRYPTION_KEY`: Base64-encoded 32-byte AES-256 key for encrypting sensitive data
 
 ### Example Environment Variables
 
 ```bash
-# Example for Google OAuth
+# Example for Google OAuth with PostgreSQL
 DATABASE_DSN="postgres://oauth_user:oauth_password@localhost:5432/oauth_proxy?sslmode=disable"
 SCOPES_SUPPORTED="openid,profile,email"
 OAUTH_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
@@ -59,6 +78,13 @@ OAUTH_CLIENT_SECRET="your-google-client-secret"
 OAUTH_AUTHORIZE_URL="https://accounts.google.com"
 MCP_SERVER_URL="http://localhost:3000"
 ENCRYPTION_KEY="base64-encoded-32-byte-aes-256-key"
+
+# Example for Google OAuth with SQLite (DATABASE_DSN not set, will use data/oauth_proxy.db)
+SCOPES_SUPPORTED="openid,profile,email"
+OAUTH_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
+OAUTH_CLIENT_SECRET="your-google-client-secret"
+OAUTH_AUTHORIZE_URL="https://accounts.google.com"
+MCP_SERVER_URL="http://localhost:3000"
 
 # Example for Microsoft Azure AD
 # SCOPES_SUPPORTED="openid,profile,email,User.Read"
@@ -221,6 +247,8 @@ You can customize the scopes based on your needs. Common additional scopes inclu
 
 1. **Create a docker-compose.yml file**:
 
+   **For PostgreSQL (production):**
+
    ```yaml
    version: "3.8"
    services:
@@ -252,6 +280,26 @@ You can customize the scopes based on your needs. Common additional scopes inclu
 
    volumes:
      postgres_data:
+   ```
+
+   **For SQLite (simpler setup):**
+
+   ```yaml
+   version: "3.8"
+   services:
+     oauth-proxy:
+       image: ghcr.io/obot-platform/mcp-oauth-proxy:master
+       environment:
+         # DATABASE_DSN not set - will use SQLite
+         SCOPES_SUPPORTED: "openid,profile,email"
+         OAUTH_CLIENT_ID: "your-oauth-client-id"
+         OAUTH_CLIENT_SECRET: "your-oauth-client-secret"
+         OAUTH_AUTHORIZE_URL: "https://your-oauth-provider.com/oauth/authorize"
+         MCP_SERVER_URL: "http://localhost:3000/mcp"
+       volumes:
+         - ./data:/app/data # Persist SQLite database
+       ports:
+         - "8080:8080"
    ```
 
 2. **Start the services**:

@@ -1,4 +1,4 @@
-.PHONY: help test test-short test-integration test-race test-coverage lint build clean docker-build docker-run
+.PHONY: help test test-short test-integration test-race test-coverage lint build clean docker-build docker-run demo-sqlite test-sqlite
 
 # Default target
 help:
@@ -8,9 +8,11 @@ help:
 	@echo "  test-integration - Run integration tests"
 	@echo "  test-race      - Run tests with race detection"
 	@echo "  test-coverage  - Run tests with coverage report"
+	@echo "  test-sqlite    - Run SQLite database tests"
 	@echo "  lint           - Run linter"
 	@echo "  build          - Build the application"
 	@echo "  clean          - Clean build artifacts"
+	@echo "  demo-sqlite    - Run SQLite demo"
 	@echo "  docker-build   - Build Docker image"
 	@echo "  docker-run     - Run Docker container"
 
@@ -69,6 +71,13 @@ setup-test-db:
 clean-test-db:
 	docker stop postgres-test || true
 	docker rm postgres-test || true
+
+# SQLite targets
+test-sqlite:
+	go test -v ./database -run TestSQLiteDatabase
+
+demo-sqlite:
+	./demo_sqlite.sh
 
 # Run all checks (for CI)
 ci: deps fmt vet lint test-short test-race test-coverage 
