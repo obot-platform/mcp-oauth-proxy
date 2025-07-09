@@ -476,10 +476,11 @@ func (d *Database) RevokeToken(token string) error {
 func (d *Database) UpdateTokenRefreshToken(accessToken, newRefreshToken string) error {
 	query := `UPDATE access_tokens SET refresh_token = $1 WHERE access_token = $2`
 
-	// Hash the new refresh token
-	hashedRefreshToken := hashToken(newRefreshToken)
+	hashedAccessToken := hashToken(accessToken)
 
-	_, err := d.db.Exec(query, hashedRefreshToken, accessToken)
+	hashedNewRefreshToken := hashToken(newRefreshToken)
+
+	_, err := d.db.Exec(query, hashedNewRefreshToken, hashedAccessToken)
 	return err
 }
 

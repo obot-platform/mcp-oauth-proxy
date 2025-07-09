@@ -3,6 +3,7 @@ package database
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"os"
 	"testing"
 	"time"
 
@@ -18,7 +19,10 @@ func TestDatabaseOperations(t *testing.T) {
 	}
 
 	// Create test database
-	dsn := "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("Skipping database tests: TEST_DATABASE_DSN is not set")
+	}
 	db, err := NewDatabase(dsn)
 	if err != nil {
 		t.Skipf("Skipping database tests: %v", err)
@@ -51,10 +55,17 @@ func TestDatabaseOperations(t *testing.T) {
 }
 
 func testClientOperations(t *testing.T, db *Database) {
+
+	clientID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	clientSecret, err := generateRandomString(16)
+	require.NoError(t, err)
+
 	// Test storing client
 	client := &ClientInfo{
-		ClientID:                "test_client_db",
-		ClientSecret:            "test_secret",
+		ClientID:                clientID,
+		ClientSecret:            clientSecret,
 		RedirectUris:            []string{"https://test.example.com/callback"},
 		ClientName:              "Test Client DB",
 		LogoURI:                 "https://test.example.com/logo.png",
@@ -69,11 +80,11 @@ func testClientOperations(t *testing.T, db *Database) {
 		TokenEndpointAuthMethod: "client_secret_basic",
 	}
 
-	err := db.StoreClient(client)
+	err = db.StoreClient(client)
 	require.NoError(t, err)
 
 	// Test retrieving client
-	retrievedClient, err := db.GetClient("test_client_db")
+	retrievedClient, err := db.GetClient(clientID)
 	require.NoError(t, err)
 	assert.Equal(t, client.ClientID, retrievedClient.ClientID)
 	assert.Equal(t, client.ClientSecret, retrievedClient.ClientSecret)
@@ -96,11 +107,20 @@ func testClientOperations(t *testing.T, db *Database) {
 }
 
 func testGrantOperations(t *testing.T, db *Database) {
+	clientID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	userID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	grantID, err := generateRandomString(16)
+	require.NoError(t, err)
+
 	// Test storing grant
 	grant := &Grant{
-		ID:                  "test_grant_db_123",
-		ClientID:            "test_client_db",
-		UserID:              "test_user_123",
+		ID:                  grantID,
+		ClientID:            clientID,
+		UserID:              userID,
 		Scope:               []string{"read", "write", "admin"},
 		Metadata:            map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
 		Props:               map[string]interface{}{"email": "test@example.com", "name": "Test User"},
@@ -110,11 +130,11 @@ func testGrantOperations(t *testing.T, db *Database) {
 		CodeChallengeMethod: "S256",
 	}
 
-	err := db.StoreGrant(grant)
+	err = db.StoreGrant(grant)
 	require.NoError(t, err)
 
 	// Test retrieving grant
-	retrievedGrant, err := db.GetGrant("test_grant_db_123", "test_user_123")
+	retrievedGrant, err := db.GetGrant(grantID, userID)
 	require.NoError(t, err)
 	assert.Equal(t, grant.ID, retrievedGrant.ID)
 	assert.Equal(t, grant.ClientID, retrievedGrant.ClientID)
@@ -143,6 +163,17 @@ func testTokenOperations(t *testing.T, db *Database) {
 	grantID, err := generateRandomString(16)
 	require.NoError(t, err)
 
+	grant := &Grant{
+		ID:       grantID,
+		ClientID: "test_client_db",
+		UserID:   "test_user_123",
+		Scope:    []string{"read", "write", "admin"},
+		Metadata: map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+	}
+
+	err = db.StoreGrant(grant)
+	require.NoError(t, err)
+
 	refreshTokenData, err := generateRandomString(16)
 	require.NoError(t, err)
 
@@ -166,10 +197,10 @@ func testTokenOperations(t *testing.T, db *Database) {
 	require.NoError(t, err)
 
 	// Test retrieving token
-	retrievedToken, err := db.GetToken("test_access_token_db_123")
+	retrievedToken, err := db.GetToken(accessTokenData)
 	require.NoError(t, err)
-	assert.Equal(t, tokenData.AccessToken, retrievedToken.AccessToken)
-	assert.Equal(t, tokenData.RefreshToken, retrievedToken.RefreshToken)
+	assert.Equal(t, hashToken(tokenData.AccessToken), retrievedToken.AccessToken)
+	assert.Equal(t, hashToken(tokenData.RefreshToken), retrievedToken.RefreshToken)
 	assert.Equal(t, tokenData.ClientID, retrievedToken.ClientID)
 	assert.Equal(t, tokenData.UserID, retrievedToken.UserID)
 	assert.Equal(t, tokenData.GrantID, retrievedToken.GrantID)
@@ -179,7 +210,7 @@ func testTokenOperations(t *testing.T, db *Database) {
 	// Test retrieving token by refresh token
 	refreshToken, err := db.GetTokenByRefreshToken(refreshTokenData)
 	require.NoError(t, err)
-	assert.Equal(t, tokenData.AccessToken, refreshToken.AccessToken)
+	assert.Equal(t, hashToken(tokenData.AccessToken), refreshToken.AccessToken)
 	assert.Equal(t, tokenData.RefreshToken, refreshToken.RefreshToken)
 
 	// Test revoking token
@@ -199,7 +230,7 @@ func testTokenOperations(t *testing.T, db *Database) {
 
 	updatedToken, err := db.GetToken(accessTokenData)
 	require.NoError(t, err)
-	assert.Equal(t, newRefreshTokenData, updatedToken.RefreshToken)
+	assert.Equal(t, hashToken(newRefreshTokenData), updatedToken.RefreshToken)
 
 	// Test retrieving non-existent token
 	_, err = db.GetToken("non_existent_token")
@@ -208,11 +239,27 @@ func testTokenOperations(t *testing.T, db *Database) {
 
 func testAuthCodeOperations(t *testing.T, db *Database) {
 	// Test storing authorization code
-	code := "test_auth_code_db_123"
-	grantID := "test_grant_db_123"
-	userID := "test_user_123"
+	code, err := generateRandomString(16)
+	require.NoError(t, err)
 
-	err := db.StoreAuthCode(code, grantID, userID)
+	grantID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	userID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	grant := &Grant{
+		ID:       grantID,
+		ClientID: "test_client_db",
+		UserID:   userID,
+		Scope:    []string{"read", "write", "admin"},
+		Metadata: map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+	}
+
+	err = db.StoreGrant(grant)
+	require.NoError(t, err)
+
+	err = db.StoreAuthCode(code, grantID, userID)
 	require.NoError(t, err)
 
 	// Test validating authorization code
@@ -231,20 +278,43 @@ func testAuthCodeOperations(t *testing.T, db *Database) {
 }
 
 func testCleanupOperations(t *testing.T, db *Database) {
+	grantID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	userID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	grant := &Grant{
+		ID:       grantID,
+		ClientID: "test_client_db",
+		UserID:   userID,
+		Scope:    []string{"read", "write", "admin"},
+		Metadata: map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+	}
+
+	err = db.StoreGrant(grant)
+	require.NoError(t, err)
+
+	accessTokenData, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	refreshTokenData, err := generateRandomString(16)
+	require.NoError(t, err)
+
 	// Create expired tokens
 	expiredToken := &TokenData{
-		AccessToken:  "expired_token_123",
-		RefreshToken: "expired_refresh_123",
+		AccessToken:  accessTokenData,
+		RefreshToken: refreshTokenData,
 		ClientID:     "test_client_db",
-		UserID:       "test_user_123",
-		GrantID:      "test_grant_db_123",
+		UserID:       userID,
+		GrantID:      grantID,
 		Scope:        "read write",
 		ExpiresAt:    time.Now().Add(-1 * time.Hour), // Expired
 		CreatedAt:    time.Now().Add(-2 * time.Hour),
 		Revoked:      false,
 	}
 
-	err := db.StoreToken(expiredToken)
+	err = db.StoreToken(expiredToken)
 	require.NoError(t, err)
 
 	// Test cleanup
