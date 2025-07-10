@@ -15,7 +15,7 @@ type UserInfo struct {
 type TokenInfo struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
+	ExpireAt     int64  `json:"expires_at"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	Scope        string `json:"scope,omitempty"`
 	IDToken      string `json:"id_token,omitempty"`

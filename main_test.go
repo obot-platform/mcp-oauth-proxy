@@ -57,7 +57,7 @@ func (m *MockProvider) ExchangeCodeForToken(ctx context.Context, code, clientID,
 	return &providers.TokenInfo{
 		AccessToken:  "mock_access_token_" + code,
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
+		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
 		RefreshToken: "mock_refresh_token_" + code,
 		Scope:        "read write",
 		IDToken:      "mock_id_token_" + code,
@@ -78,7 +78,7 @@ func (m *MockProvider) RefreshToken(ctx context.Context, refreshToken, clientID,
 	return &providers.TokenInfo{
 		AccessToken:  "mock_new_access_token",
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
+		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
 		RefreshToken: "mock_new_refresh_token",
 		Scope:        "read write",
 	}, nil
@@ -1090,7 +1090,7 @@ func TestMockProvider(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "mock_access_token_test_code", tokenInfo.AccessToken)
 	assert.Equal(t, "Bearer", tokenInfo.TokenType)
-	assert.Equal(t, 3600, tokenInfo.ExpiresIn)
+	assert.Greater(t, tokenInfo.ExpireAt, time.Now().Unix())
 
 	// Test GetUserInfo
 	userInfo, err := provider.GetUserInfo(ctx, "test_token")

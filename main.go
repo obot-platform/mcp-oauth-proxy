@@ -692,6 +692,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 		"name":          userInfo.Name,
 		"access_token":  tokenInfo.AccessToken,
 		"refresh_token": tokenInfo.RefreshToken,
+		"expires_at":    tokenInfo.ExpireAt,
 	}
 
 	// Initialize props map
@@ -923,6 +924,72 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 	tokenInfo := c.MustGet("token_info").(*tokens.TokenInfo)
 	path := c.Param("path")
+
+	// Check if the access token is expired and refresh if needed
+	if tokenInfo.Props != nil {
+		if _, ok := tokenInfo.Props["access_token"].(string); ok {
+			// Check if token is expired (with a 5-minute buffer)
+			expiresAt, ok := tokenInfo.Props["expires_at"].(float64)
+			if ok && expiresAt > 0 {
+				if time.Now().Add(5 * time.Minute).After(time.Unix(int64(expiresAt), 0)) {
+					log.Printf("Access token is expired or will expire soon, attempting to refresh")
+
+					// Get the refresh token
+					refreshToken, ok := tokenInfo.Props["refresh_token"].(string)
+					if !ok || refreshToken == "" {
+						log.Printf("No refresh token available, cannot refresh access token")
+						c.JSON(http.StatusUnauthorized, gin.H{
+							"error":             "invalid_token",
+							"error_description": "Access token expired and no refresh token available",
+						})
+						return
+					}
+
+					// Get the provider
+					provider, err := p.providers.GetProvider(p.provider)
+					if err != nil {
+						log.Printf("Failed to get provider for token refresh: %v", err)
+						c.JSON(http.StatusInternalServerError, gin.H{
+							"error":             "server_error",
+							"error_description": "Failed to refresh token",
+						})
+						return
+					}
+
+					// Get provider credentials
+					clientID := os.Getenv("OAUTH_CLIENT_ID")
+					clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
+					if clientID == "" || clientSecret == "" {
+						log.Printf("OAuth credentials not configured for token refresh")
+						c.JSON(http.StatusInternalServerError, gin.H{
+							"error":             "server_error",
+							"error_description": "OAuth credentials not configured",
+						})
+						return
+					}
+
+					// Refresh the token
+					newTokenInfo, err := provider.RefreshToken(c.Request.Context(), refreshToken, clientID, clientSecret)
+					if err != nil {
+						log.Printf("Failed to refresh token: %v", err)
+						c.JSON(http.StatusUnauthorized, gin.H{
+							"error":             "invalid_token",
+							"error_description": "Failed to refresh access token",
+						})
+						return
+					}
+
+					// Update the token info with the new access token
+					tokenInfo.Props["access_token"] = newTokenInfo.AccessToken
+					if newTokenInfo.RefreshToken != "" {
+						tokenInfo.Props["refresh_token"] = newTokenInfo.RefreshToken
+					}
+
+					log.Printf("Successfully refreshed access token")
+				}
+			}
+		}
+	}
 
 	// Create target URL
 	var targetURL string

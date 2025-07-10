@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func (m *MockProviderForTest) ExchangeCodeForToken(ctx context.Context, code, cl
 	return &TokenInfo{
 		AccessToken:  "mock_access_token_" + code,
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
+		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
 		RefreshToken: "mock_refresh_token_" + code,
 		Scope:        "read write",
 		IDToken:      "mock_id_token_" + code,
@@ -44,7 +45,7 @@ func (m *MockProviderForTest) RefreshToken(ctx context.Context, refreshToken, cl
 	return &TokenInfo{
 		AccessToken:  "mock_new_access_token",
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
+		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
 		RefreshToken: "mock_new_refresh_token",
 		Scope:        "read write",
 	}, nil
@@ -159,7 +160,7 @@ func TestMockProvider(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "mock_access_token_test_code", tokenInfo.AccessToken)
 		assert.Equal(t, "Bearer", tokenInfo.TokenType)
-		assert.Equal(t, 3600, tokenInfo.ExpiresIn)
+		assert.Greater(t, tokenInfo.ExpireAt, time.Now().Unix())
 		assert.Equal(t, "mock_refresh_token_test_code", tokenInfo.RefreshToken)
 		assert.Equal(t, "read write", tokenInfo.Scope)
 		assert.Equal(t, "mock_id_token_test_code", tokenInfo.IDToken)
@@ -180,7 +181,7 @@ func TestMockProvider(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "mock_new_access_token", tokenInfo.AccessToken)
 		assert.Equal(t, "Bearer", tokenInfo.TokenType)
-		assert.Equal(t, 3600, tokenInfo.ExpiresIn)
+		assert.Greater(t, tokenInfo.ExpireAt, time.Now().Unix())
 		assert.Equal(t, "mock_new_refresh_token", tokenInfo.RefreshToken)
 		assert.Equal(t, "read write", tokenInfo.Scope)
 	})
@@ -200,7 +201,7 @@ func TestTokenInfo(t *testing.T) {
 	tokenInfo := &TokenInfo{
 		AccessToken:  "test_access_token",
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
+		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
 		RefreshToken: "test_refresh_token",
 		Scope:        "read write",
 		IDToken:      "test_id_token",
@@ -208,7 +209,7 @@ func TestTokenInfo(t *testing.T) {
 
 	assert.Equal(t, "test_access_token", tokenInfo.AccessToken)
 	assert.Equal(t, "Bearer", tokenInfo.TokenType)
-	assert.Equal(t, 3600, tokenInfo.ExpiresIn)
+	assert.Greater(t, tokenInfo.ExpireAt, time.Now().Unix())
 	assert.Equal(t, "test_refresh_token", tokenInfo.RefreshToken)
 	assert.Equal(t, "read write", tokenInfo.Scope)
 	assert.Equal(t, "test_id_token", tokenInfo.IDToken)
