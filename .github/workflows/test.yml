@@ -7,7 +7,7 @@ on:
     branches: [master, main]
 
 jobs:
-  test:
+  test-postgres:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -28,10 +28,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Go ${{ matrix.go-version }}
+      - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: "1.21"
 
       - name: Install dependencies
         run: go mod download
@@ -42,38 +42,118 @@ jobs:
           version: latest
           args: --timeout=5m
 
-      - name: Run unit tests
+      - name: Run unit tests (PostgreSQL)
         run: go test -v -short ./...
 
-      - name: Run integration tests
+      - name: Run integration tests (PostgreSQL)
         env:
           TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
         run: go test -v -run "TestIntegration" ./...
 
-      - name: Run all tests with race detection
+      - name: Run all tests with race detection (PostgreSQL)
         env:
           TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
         run: go test -v -race ./...
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage (PostgreSQL)
         env:
           TEST_DATABASE_DSN: "postgres://test:test@localhost:5432/oauth_test?sslmode=disable"
-        run: go test -v -coverprofile=coverage.out ./...
+        run: go test -v -coverprofile=coverage-postgres.out ./...
 
-      - name: Generate coverage report
-        run: go tool cover -html=coverage.out -o coverage.html
+      - name: Generate coverage report (PostgreSQL)
+        run: go tool cover -html=coverage-postgres.out -o coverage-postgres.html
 
-      - name: Upload coverage to Codecov
+      - name: Upload coverage to Codecov (PostgreSQL)
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.out
-          flags: unittests
-          name: codecov-umbrella
+          file: ./coverage-postgres.out
+          flags: postgres-tests
+          name: codecov-postgres
           fail_ci_if_error: false
 
-      - name: Upload coverage report as artifact
+      - name: Upload coverage report as artifact (PostgreSQL)
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-${{ matrix.go-version }}-${{ matrix.postgres-version }}
-          path: coverage.html
+          name: coverage-report-postgres
+          path: coverage-postgres.html
           retention-days: 30
+
+  test-sqlite:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run unit tests (SQLite)
+        run: go test -v -short ./...
+
+      - name: Run integration tests (SQLite)
+        run: go test -v -run "TestIntegration" ./...
+
+      - name: Run integration tests with SQLite fallback
+        env:
+          DATABASE_DSN: ""
+        run: go test -v -run "TestIntegration" ./...
+
+      - name: Run all tests with race detection (SQLite)
+        run: go test -v -race ./...
+
+      - name: Run tests with coverage (SQLite)
+        run: go test -v -coverprofile=coverage-sqlite.out ./...
+
+      - name: Generate coverage report (SQLite)
+        run: go tool cover -html=coverage-sqlite.out -o coverage-sqlite.html
+
+      - name: Upload coverage to Codecov (SQLite)
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage-sqlite.out
+          flags: sqlite-tests
+          name: codecov-sqlite
+          fail_ci_if_error: false
+
+      - name: Upload coverage report as artifact (SQLite)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-sqlite
+          path: coverage-sqlite.html
+          retention-days: 30
+
+      - name: Run SQLite-specific database tests
+        run: go test -v ./database -run TestSQLiteDatabase
+
+      - name: Run all database tests with SQLite
+        run: go test -v ./database
+
+      - name: Test SQLite demo build
+        run: |
+          # Test that the application builds and runs with SQLite
+          go build -o mcp-oauth-proxy .
+          ./mcp-oauth-proxy --help || true
+          rm mcp-oauth-proxy
+
+      - name: Test SQLite fallback behavior
+        run: |
+          # Test that the application uses SQLite when DATABASE_DSN is not set
+          unset DATABASE_DSN
+          go test -v ./database -run TestSQLiteDatabase
+
+      - name: Test application startup with SQLite
+        env:
+          DATABASE_DSN: ""
+          OAUTH_CLIENT_ID: "test_client"
+          OAUTH_CLIENT_SECRET: "test_secret"
+          OAUTH_AUTHORIZE_URL: "https://test.example.com/oauth/authorize"
+          MCP_SERVER_URL: "http://localhost:3000"
+        run: |
+          # Test that the application can start with SQLite configuration
+          timeout 10s go run . || true

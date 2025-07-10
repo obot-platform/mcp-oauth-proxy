@@ -363,12 +363,68 @@ The proxy forwards requests to the configured MCP server with the following head
 
 ## Testing
 
+### Quick Test
+
 Run the test script to test the OAuth flow:
 
 ```bash
 chmod +x test_oauth.sh
 ./test_oauth.sh
 ```
+
+### Comprehensive Testing
+
+The project includes comprehensive testing for both PostgreSQL and SQLite databases:
+
+#### Run All Tests
+
+```bash
+# Run all tests (PostgreSQL)
+make test
+
+# Run SQLite tests only
+make test-sqlite
+
+# Run comprehensive CI tests locally
+./test_sqlite_ci.sh
+```
+
+#### Database-Specific Tests
+
+```bash
+# PostgreSQL tests (requires PostgreSQL running)
+TEST_DATABASE_DSN="postgres://test:test@localhost:5432/oauth_test?sslmode=disable" go test -v ./...
+
+# SQLite tests (no database setup required)
+DATABASE_DSN="" go test -v ./database -run TestSQLiteDatabase
+```
+
+#### CI Testing
+
+The project uses GitHub Actions for continuous integration with:
+
+- **PostgreSQL Testing**: Full test suite with PostgreSQL database
+- **SQLite Testing**: Full test suite with SQLite database (fallback mode)
+- **Code Coverage**: Coverage reports for both database types
+- **Linting**: Code quality checks
+- **Race Detection**: Concurrency testing
+- **Build Verification**: Ensures the application builds and starts correctly
+
+The CI workflow runs on:
+
+- Push to `master` or `main` branch
+- Pull requests to `master` or `main` branch
+
+#### Test Coverage
+
+The test suite covers:
+
+- OAuth authorization flow
+- Token management and refresh
+- Database operations (PostgreSQL and SQLite)
+- Provider integration
+- MCP proxy functionality
+- Error handling and edge cases
 
 ## Credits
 

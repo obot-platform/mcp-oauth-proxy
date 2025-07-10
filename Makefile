@@ -75,9 +75,15 @@ clean-test-db:
 # SQLite targets
 test-sqlite:
 	go test -v ./database -run TestSQLiteDatabase
+	go test -v ./database
+	DATABASE_DSN="" go test -v ./database -run TestSQLiteDatabase
+	DATABASE_DSN="" go test -v -run "TestIntegration" ./...
 
 demo-sqlite:
 	./demo_sqlite.sh
 
 # Run all checks (for CI)
-ci: deps fmt vet lint test-short test-race test-coverage 
+ci: deps fmt vet lint test-short test-race test-coverage
+
+# Run all checks including SQLite (for CI)
+ci-full: deps fmt vet lint test-short test-race test-coverage test-sqlite 
