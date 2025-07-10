@@ -688,10 +688,10 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 
 	// Prepare sensitive props data
 	sensitiveProps := map[string]interface{}{
-		"email":                  userInfo.Email,
-		"name":                   userInfo.Name,
-		"provider_access_token":  tokenInfo.AccessToken,
-		"provider_refresh_token": tokenInfo.RefreshToken,
+		"email":         userInfo.Email,
+		"name":          userInfo.Name,
+		"access_token":  tokenInfo.AccessToken,
+		"refresh_token": tokenInfo.RefreshToken,
 	}
 
 	// Initialize props map

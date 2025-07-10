@@ -76,8 +76,6 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 		return nil, fmt.Errorf("token has been revoked")
 	}
 
-	fmt.Println(time.Now())
-
 	// Check if token is expired
 	if time.Now().After(tokenData.ExpiresAt) {
 		return nil, fmt.Errorf("token has expired")
