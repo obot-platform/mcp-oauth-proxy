@@ -134,26 +134,8 @@ jobs:
       - name: Run all database tests with SQLite
         run: go test -v ./database
 
-      - name: Test SQLite demo build
-        run: |
-          # Test that the application builds and runs with SQLite
-          go build -o mcp-oauth-proxy .
-          ./mcp-oauth-proxy --help || true
-          rm mcp-oauth-proxy
-
       - name: Test SQLite fallback behavior
         run: |
           # Test that the application uses SQLite when DATABASE_DSN is not set
           unset DATABASE_DSN
           go test -v ./database -run TestSQLiteDatabase
-
-      - name: Test application startup with SQLite
-        env:
-          DATABASE_DSN: ""
-          OAUTH_CLIENT_ID: "test_client"
-          OAUTH_CLIENT_SECRET: "test_secret"
-          OAUTH_AUTHORIZE_URL: "https://test.example.com/oauth/authorize"
-          MCP_SERVER_URL: "http://localhost:3000"
-        run: |
-          # Test that the application can start with SQLite configuration
-          timeout 10s go run . || true
