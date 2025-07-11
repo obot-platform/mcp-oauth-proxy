@@ -222,9 +222,9 @@ func (p *GenericProvider) addRefreshTokenParams(q url.Values) {
 		// Add offline_access scope for Microsoft to get refresh tokens
 		currentScope := q.Get("scope")
 		if currentScope != "" && !strings.Contains(currentScope, "offline_access") {
-			q.Set("scope", currentScope+" offline_access")
+			q.Set("scope", currentScope+" https://graph.microsoft.com/offline_access")
 		} else if currentScope == "" {
-			q.Set("scope", "offline_access")
+			q.Set("scope", "https://graph.microsoft.com/offline_access")
 		}
 	}
 }
