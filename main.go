@@ -396,7 +396,14 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	// Set database dependency for token validation
 	tokenManager.SetDatabase(&databaseAdapter{db: db})
 
-	scopesSupported := strings.Split(os.Getenv("SCOPES_SUPPORTED"), ",")
+	// Split and trim scopes to handle whitespace
+	scopesRaw := strings.Split(os.Getenv("SCOPES_SUPPORTED"), ",")
+	scopesSupported := make([]string, 0, len(scopesRaw))
+	for _, scope := range scopesRaw {
+		if trimmed := strings.TrimSpace(scope); trimmed != "" {
+			scopesSupported = append(scopesSupported, trimmed)
+		}
+	}
 
 	metadata := &OAuthMetadata{
 		ResponseTypesSupported:                   []string{"code"},
