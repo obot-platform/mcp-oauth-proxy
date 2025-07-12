@@ -1037,7 +1037,6 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("Proxy error: %v", err)
-			http.Error(w, "Proxy error", http.StatusBadGateway)
 		},
 	}
 

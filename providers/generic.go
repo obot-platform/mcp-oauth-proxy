@@ -200,32 +200,18 @@ func (p *GenericProvider) GetAuthorizationURLWithPKCE(clientID, redirectURI, sco
 // addRefreshTokenParams adds provider-specific parameters to request refresh tokens
 func (p *GenericProvider) addRefreshTokenParams(q url.Values) {
 	// Detect provider based on authorization URL or discovered endpoints
-	var isGoogle, isMicrosoft bool
+	var isGoogle bool
 
 	if p.metadata != nil && p.metadata.AuthorizationEndpoint != "" {
 		isGoogle = strings.Contains(p.metadata.AuthorizationEndpoint, "accounts.google.com")
-		isMicrosoft = strings.Contains(p.metadata.AuthorizationEndpoint, "login.microsoftonline.com")
 	} else {
 		isGoogle = strings.Contains(p.authorizeURL, "accounts.google.com")
-		isMicrosoft = strings.Contains(p.authorizeURL, "login.microsoftonline.com")
 	}
 
 	// Google OAuth requires specific parameters for refresh tokens
 	if isGoogle {
 		q.Set("access_type", "offline") // Request refresh token
 		q.Set("prompt", "consent")      // Always show consent screen to get refresh token
-	}
-
-	// Microsoft OAuth requires specific parameters
-	if isMicrosoft {
-		q.Set("response_mode", "query")
-		// Add offline_access scope for Microsoft to get refresh tokens
-		currentScope := q.Get("scope")
-		if currentScope != "" && !strings.Contains(currentScope, "offline_access") {
-			q.Set("scope", currentScope+" https://graph.microsoft.com/offline_access")
-		} else if currentScope == "" {
-			q.Set("scope", "https://graph.microsoft.com/offline_access")
-		}
 	}
 }
 
