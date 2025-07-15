@@ -397,13 +397,7 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	tokenManager.SetDatabase(&databaseAdapter{db: db})
 
 	// Split and trim scopes to handle whitespace
-	scopesRaw := strings.Split(os.Getenv("SCOPES_SUPPORTED"), ",")
-	scopesSupported := make([]string, 0, len(scopesRaw))
-	for _, scope := range scopesRaw {
-		if trimmed := strings.TrimSpace(scope); trimmed != "" {
-			scopesSupported = append(scopesSupported, trimmed)
-		}
-	}
+	scopesSupported := ParseScopesSupported(os.Getenv("SCOPES_SUPPORTED"))
 
 	metadata := &OAuthMetadata{
 		ResponseTypesSupported:                   []string{"code"},
@@ -509,6 +503,10 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 		State:               params.Get("state"),
 		CodeChallenge:       params.Get("code_challenge"),
 		CodeChallengeMethod: params.Get("code_challenge_method"),
+	}
+
+	if authReq.Scope == "" {
+		authReq.Scope = strings.Join(p.metadata.ScopesSupported, " ")
 	}
 
 	// Validate required parameters
@@ -1066,6 +1064,18 @@ func generateRandomStringSafe(length int) string {
 		panic(fmt.Sprintf("failed to generate random string: %v", err))
 	}
 	return str
+}
+
+// ParseScopesSupported parses a comma-separated scopes string and trims whitespace from each scope.
+func ParseScopesSupported(envScopes string) []string {
+	scopesRaw := strings.Split(envScopes, ",")
+	scopesSupported := make([]string, 0, len(scopesRaw))
+	for _, scope := range scopesRaw {
+		if trimmed := strings.TrimSpace(scope); trimmed != "" {
+			scopesSupported = append(scopesSupported, trimmed)
+		}
+	}
+	return scopesSupported
 }
 
 func main() {

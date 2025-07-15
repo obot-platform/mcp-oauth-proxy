@@ -294,6 +294,52 @@ func TestAuthorizationEndpoint(t *testing.T) {
 	assert.Contains(t, location, "client_id=test_client")
 }
 
+// TestAuthorizationEndpointWithoutScope tests that when scope is not provided, it's automatically added from metadata
+func TestAuthorizationEndpointWithoutScope(t *testing.T) {
+	ts := setupTestSuite(t)
+	defer ts.cleanupTestSuite()
+
+	// create a random client ID
+	clientID := "test_client_no_scope_" + generateRandomStringSafe(8)
+
+	// Register a test client first
+	clientInfo := &database.ClientInfo{
+		ClientID:                clientID,
+		ClientSecret:            "test_secret",
+		RedirectUris:            []string{"https://test.example.com/callback"},
+		ClientName:              "Test Client No Scope",
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "client_secret_basic",
+	}
+	err := ts.db.StoreClient(clientInfo)
+	require.NoError(t, err)
+
+	// Test authorization request WITHOUT scope parameter
+	params := url.Values{}
+	params.Set("response_type", "code")
+	params.Set("client_id", clientID)
+	params.Set("redirect_uri", "https://test.example.com/callback")
+	params.Set("state", "test_state_no_scope")
+
+	req, err := http.NewRequest("GET", "/authorize?"+params.Encode(), nil)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	ts.router.ServeHTTP(w, req)
+
+	// Should redirect to mock provider
+	assert.Equal(t, http.StatusFound, w.Code)
+	location := w.Header().Get("Location")
+	assert.Contains(t, location, "https://mock-provider.com/oauth/authorize")
+	assert.Contains(t, location, "client_id=test_client")
+
+	// Verify that scope was automatically added from metadata
+	// The metadata in setupTestSuite has scopes: ["read", "write", "admin"]
+	// So the scope should be "read write admin"
+	assert.Contains(t, location, "scope=read+write+admin")
+}
+
 // TestCallbackEndpoint tests the OAuth callback endpoint
 func TestCallbackEndpoint(t *testing.T) {
 	ts := setupTestSuite(t)
@@ -1107,4 +1153,79 @@ func TestMockProvider(t *testing.T) {
 
 	// Test GetName
 	assert.Equal(t, "test_mock", provider.GetName())
+}
+
+// TestScopesSupportedParsing tests that SCOPES_SUPPORTED environment variable is properly parsed and trimmed
+func TestScopesSupportedParsing(t *testing.T) {
+	// Test cases with various whitespace scenarios
+	testCases := []struct {
+		name     string
+		envValue string
+		expected []string
+	}{
+		{
+			name:     "normal scopes",
+			envValue: "read,write,admin",
+			expected: []string{"read", "write", "admin"},
+		},
+		{
+			name:     "scopes with leading spaces",
+			envValue: " read , write , admin ",
+			expected: []string{"read", "write", "admin"},
+		},
+		{
+			name:     "scopes with trailing spaces",
+			envValue: "read ,write ,admin ",
+			expected: []string{"read", "write", "admin"},
+		},
+		{
+			name:     "scopes with mixed whitespace",
+			envValue: "  read  ,  write  ,  admin  ",
+			expected: []string{"read", "write", "admin"},
+		},
+		{
+			name:     "single scope",
+			envValue: "read",
+			expected: []string{"read"},
+		},
+		{
+			name:     "single scope with spaces",
+			envValue: " read ",
+			expected: []string{"read"},
+		},
+		{
+			name:     "empty string",
+			envValue: "",
+			expected: []string{},
+		},
+		{
+			name:     "only spaces",
+			envValue: "   ",
+			expected: []string{},
+		},
+		{
+			name:     "scopes with tabs and newlines",
+			envValue: "read\t,\nwrite,\tadmin\n",
+			expected: []string{"read", "write", "admin"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set the environment variable
+			if tc.envValue != "" {
+				err := os.Setenv("SCOPES_SUPPORTED", tc.envValue)
+				require.NoError(t, err)
+			} else {
+				err := os.Unsetenv("SCOPES_SUPPORTED")
+				require.NoError(t, err)
+			}
+
+			// Parse the scopes using the same logic as in main.go
+			scopesSupported := ParseScopesSupported(os.Getenv("SCOPES_SUPPORTED"))
+
+			// Verify the result
+			assert.Equal(t, tc.expected, scopesSupported, "Failed for test case: %s", tc.name)
+		})
+	}
 }
