@@ -210,7 +210,7 @@ func TestOAuthMetadataEndpoint(t *testing.T) {
 	ts := setupTestSuite(t)
 	defer ts.cleanupTestSuite()
 
-	req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server/mcp", nil)
+	req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
 	require.NoError(t, err)
 	req.Host = "test.example.com"
 
@@ -909,7 +909,7 @@ func TestRateLimiting(t *testing.T) {
 
 	// Make multiple requests to trigger rate limiting
 	for i := 0; i < 105; i++ {
-		req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server/mcp", nil)
+		req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
 		require.NoError(t, err)
 		req.Host = "test.example.com"
 

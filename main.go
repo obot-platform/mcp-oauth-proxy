@@ -455,7 +455,7 @@ func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
 	r.POST("/register", p.registerHandler)
 
 	// Metadata endpoints
-	r.GET("/.well-known/oauth-authorization-server/mcp", p.oauthMetadataHandler)
+	r.GET("/.well-known/oauth-authorization-server", p.oauthMetadataHandler)
 	r.GET("/.well-known/oauth-protected-resource/mcp", p.protectedResourceMetadataHandler)
 
 	// Add protected resource endpoints
