@@ -210,7 +210,7 @@ func TestOAuthMetadataEndpoint(t *testing.T) {
 	ts := setupTestSuite(t)
 	defer ts.cleanupTestSuite()
 
-	req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+	req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server/mcp", nil)
 	require.NoError(t, err)
 	req.Host = "test.example.com"
 
@@ -235,7 +235,7 @@ func TestProtectedResourceMetadataEndpoint(t *testing.T) {
 	ts := setupTestSuite(t)
 	defer ts.cleanupTestSuite()
 
-	req, err := http.NewRequest("GET", "/.well-known/oauth-protected-resource", nil)
+	req, err := http.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp", nil)
 	require.NoError(t, err)
 	req.Host = "test.example.com"
 
@@ -250,6 +250,30 @@ func TestProtectedResourceMetadataEndpoint(t *testing.T) {
 
 	assert.Equal(t, "http://test.example.com/mcp", metadata.Resource)
 	assert.Contains(t, metadata.AuthorizationServers, "http://test.example.com")
+}
+
+// TestProtectedResourceMetadataEndpointMCP tests the protected resource metadata endpoint with /mcp path
+func TestProtectedResourceMetadataEndpointMCP(t *testing.T) {
+	ts := setupTestSuite(t)
+	defer ts.cleanupTestSuite()
+
+	req, err := http.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp", nil)
+	require.NoError(t, err)
+	req.Host = "test.example.com"
+
+	w := httptest.NewRecorder()
+	ts.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var metadata OAuthProtectedResourceMetadata
+	err = json.Unmarshal(w.Body.Bytes(), &metadata)
+	require.NoError(t, err)
+
+	// Verify that the resource URL points to the MCP endpoint
+	assert.Equal(t, "http://test.example.com/mcp", metadata.Resource)
+	assert.Contains(t, metadata.AuthorizationServers, "http://test.example.com")
+	assert.Equal(t, "test-resource", metadata.ResourceName)
 }
 
 // TestAuthorizationEndpoint tests the OAuth authorization endpoint
@@ -848,6 +872,36 @@ func TestMCPProxyEndpointUnauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestMCPProxyEndpointUnauthorizedWithResourceMetadata tests that when unauthenticated,
+// the response includes the WWW-Authenticate header with the resource metadata URL
+func TestMCPProxyEndpointUnauthorizedWithResourceMetadata(t *testing.T) {
+	ts := setupTestSuite(t)
+	defer ts.cleanupTestSuite()
+
+	// Test MCP proxy request without token
+	req, err := http.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc": "2.0", "method": "test", "params": {}}`))
+	require.NoError(t, err)
+	req.Host = "test.example.com"
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	ts.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// Check that the WWW-Authenticate header is present and contains the resource metadata URL
+	wwwAuthHeader := w.Header().Get("WWW-Authenticate")
+	assert.NotEmpty(t, wwwAuthHeader)
+	assert.Contains(t, wwwAuthHeader, "resource_metadata=\"http://test.example.com/.well-known/oauth-protected-resource/mcp\"")
+
+	// Verify the response body contains the expected error
+	var responseBody map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &responseBody)
+	require.NoError(t, err)
+	assert.Equal(t, "invalid_token", responseBody["error"])
+	assert.Equal(t, "Missing Authorization header", responseBody["error_description"])
+}
+
 // TestRateLimiting tests the rate limiting functionality
 func TestRateLimiting(t *testing.T) {
 	ts := setupTestSuite(t)
@@ -855,7 +909,7 @@ func TestRateLimiting(t *testing.T) {
 
 	// Make multiple requests to trigger rate limiting
 	for i := 0; i < 105; i++ {
-		req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+		req, err := http.NewRequest("GET", "/.well-known/oauth-authorization-server/mcp", nil)
 		require.NoError(t, err)
 		req.Host = "test.example.com"
 

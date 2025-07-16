@@ -455,8 +455,8 @@ func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
 	r.POST("/register", p.registerHandler)
 
 	// Metadata endpoints
-	r.GET("/.well-known/oauth-authorization-server", p.oauthMetadataHandler)
-	r.GET("/.well-known/oauth-protected-resource", p.protectedResourceMetadataHandler)
+	r.GET("/.well-known/oauth-authorization-server/mcp", p.oauthMetadataHandler)
+	r.GET("/.well-known/oauth-protected-resource/mcp", p.protectedResourceMetadataHandler)
 
 	// Add protected resource endpoints
 	r.Any("/mcp", p.validateTokenMiddleware(), p.mcpProxyHandler)
@@ -863,7 +863,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			// Return 401 with proper WWW-Authenticate header
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", p.getBaseURL(c))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="%s"`, resourceMetadataUrl)
 			c.Header("WWW-Authenticate", wwwAuthValue)
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -877,7 +877,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		// Parse Authorization header
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", p.getBaseURL(c))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid Authorization header format, expected 'Bearer TOKEN'", resource_metadata="%s"`, resourceMetadataUrl)
 			c.Header("WWW-Authenticate", wwwAuthValue)
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -892,7 +892,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 
 		tokenInfo, err := p.tokenManager.GetTokenInfo(token)
 		if err != nil {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", p.getBaseURL(c))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid or expired token", resource_metadata="%s"`, resourceMetadataUrl)
 			c.Header("WWW-Authenticate", wwwAuthValue)
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -907,7 +907,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		if tokenInfo.Props != nil {
 			decryptedProps, err := p.decryptPropsIfNeeded(tokenInfo.Props)
 			if err != nil {
-				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", p.getBaseURL(c))
+				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
 				wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Failed to decrypt token data", resource_metadata="%s"`, resourceMetadataUrl)
 				c.Header("WWW-Authenticate", wwwAuthValue)
 				c.JSON(http.StatusUnauthorized, gin.H{
