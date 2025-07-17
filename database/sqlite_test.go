@@ -93,6 +93,7 @@ func TestSQLiteDatabase(t *testing.T) {
 			GrantID:      "test_grant_sqlite",
 			Scope:        "openid profile",
 			ExpiresAt:    time.Now().Add(time.Hour),
+			// RefreshTokenExpiresAt will be set automatically to 30 days
 		}
 
 		// Store token
@@ -108,6 +109,18 @@ func TestSQLiteDatabase(t *testing.T) {
 		assert.Equal(t, tokenData.UserID, retrievedToken.UserID)
 		assert.Equal(t, tokenData.GrantID, retrievedToken.GrantID)
 		assert.Equal(t, tokenData.Scope, retrievedToken.Scope)
+		assert.True(t, retrievedToken.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour))) // Should be ~30 days
+
+		// Test retrieving by refresh token
+		refreshToken, err := db.GetTokenByRefreshToken("test_refresh_token_sqlite")
+		require.NoError(t, err)
+		assert.Equal(t, tokenData.ClientID, refreshToken.ClientID)
+		assert.True(t, refreshToken.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour)))
+
+		// Test refresh token expiration check
+		expired, err := db.IsRefreshTokenExpired("test_refresh_token_sqlite")
+		require.NoError(t, err)
+		assert.False(t, expired)
 	})
 
 	t.Run("TestAuthCodeOperations", func(t *testing.T) {

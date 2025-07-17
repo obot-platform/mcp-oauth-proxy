@@ -52,6 +52,14 @@ func TestDatabaseOperations(t *testing.T) {
 	t.Run("TestCleanupOperations", func(t *testing.T) {
 		testCleanupOperations(t, db)
 	})
+
+	t.Run("TestRefreshTokenExpiration", func(t *testing.T) {
+		testRefreshTokenExpiration(t, db)
+	})
+
+	t.Run("TestDatabaseMigration", func(t *testing.T) {
+		testDatabaseMigration(t, db)
+	})
 }
 
 func testClientOperations(t *testing.T, db *Database) {
@@ -182,15 +190,16 @@ func testTokenOperations(t *testing.T, db *Database) {
 
 	// Test storing token
 	tokenData := &TokenData{
-		AccessToken:  accessTokenData,
-		RefreshToken: refreshTokenData,
-		ClientID:     "test_client_db",
-		UserID:       "test_user_123",
-		GrantID:      grantID,
-		Scope:        "read write admin",
-		ExpiresAt:    time.Now().Add(1 * time.Hour),
-		CreatedAt:    time.Now(),
-		Revoked:      false,
+		AccessToken:           accessTokenData,
+		RefreshToken:          refreshTokenData,
+		ClientID:              "test_client_db",
+		UserID:                "test_user_123",
+		GrantID:               grantID,
+		Scope:                 "read write admin",
+		ExpiresAt:             time.Now().Add(1 * time.Hour),
+		RefreshTokenExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+		CreatedAt:             time.Now(),
+		Revoked:               false,
 	}
 
 	err = db.StoreToken(tokenData)
@@ -206,12 +215,14 @@ func testTokenOperations(t *testing.T, db *Database) {
 	assert.Equal(t, tokenData.GrantID, retrievedToken.GrantID)
 	assert.Equal(t, tokenData.Scope, retrievedToken.Scope)
 	assert.False(t, retrievedToken.Revoked)
+	assert.True(t, retrievedToken.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour))) // Should be ~30 days
 
 	// Test retrieving token by refresh token
 	refreshToken, err := db.GetTokenByRefreshToken(refreshTokenData)
 	require.NoError(t, err)
 	assert.Equal(t, hashToken(tokenData.AccessToken), refreshToken.AccessToken)
 	assert.Equal(t, tokenData.RefreshToken, refreshToken.RefreshToken)
+	assert.True(t, refreshToken.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour))) // Should be ~30 days
 
 	// Test revoking token
 	err = db.RevokeToken(accessTokenData)
@@ -303,15 +314,16 @@ func testCleanupOperations(t *testing.T, db *Database) {
 
 	// Create expired tokens
 	expiredToken := &TokenData{
-		AccessToken:  accessTokenData,
-		RefreshToken: refreshTokenData,
-		ClientID:     "test_client_db",
-		UserID:       userID,
-		GrantID:      grantID,
-		Scope:        "read write",
-		ExpiresAt:    time.Now().Add(-1 * time.Hour), // Expired
-		CreatedAt:    time.Now().Add(-2 * time.Hour),
-		Revoked:      false,
+		AccessToken:           accessTokenData,
+		RefreshToken:          refreshTokenData,
+		ClientID:              "test_client_db",
+		UserID:                userID,
+		GrantID:               grantID,
+		Scope:                 "read write",
+		ExpiresAt:             time.Now().Add(-1 * time.Hour), // Expired
+		RefreshTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Also expired
+		CreatedAt:             time.Now().Add(-2 * time.Hour),
+		Revoked:               false,
 	}
 
 	err = db.StoreToken(expiredToken)
@@ -321,8 +333,8 @@ func testCleanupOperations(t *testing.T, db *Database) {
 	err = db.CleanupExpiredTokens()
 	require.NoError(t, err)
 
-	// Verify expired token is cleaned up
-	_, err = db.GetToken("expired_token_123")
+	// Verify expired token is cleaned up (both access and refresh tokens expired)
+	_, err = db.GetToken(accessTokenData)
 	assert.Error(t, err)
 }
 
@@ -358,4 +370,240 @@ func TestTokenHashing(t *testing.T) {
 	// Hash should be consistent
 	assert.NotEmpty(t, hash1)
 	assert.Len(t, hash1, 44) // Base64 encoded SHA256 hash length
+}
+
+func testRefreshTokenExpiration(t *testing.T, db *Database) {
+	grantID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	clientID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	grant := &Grant{
+		ID:        grantID,
+		ClientID:  clientID,
+		UserID:    "test_user_123",
+		Scope:     []string{"read", "write", "admin"},
+		Metadata:  map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
+	}
+
+	err = db.StoreGrant(grant)
+	require.NoError(t, err)
+
+	// Test 1: Store token with default refresh token expiration (30 days)
+	accessToken1, err := generateRandomString(16)
+	require.NoError(t, err)
+	refreshToken1, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	tokenData1 := &TokenData{
+		AccessToken:  accessToken1,
+		RefreshToken: refreshToken1,
+		ClientID:     clientID,
+		UserID:       "test_user_123",
+		GrantID:      grantID,
+		Scope:        "read write admin",
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+		// RefreshTokenExpiresAt will be set automatically to 30 days
+		CreatedAt: time.Now(),
+		Revoked:   false,
+	}
+
+	err = db.StoreToken(tokenData1)
+	require.NoError(t, err)
+
+	// Verify refresh token expiration was set to 30 days
+	retrievedToken1, err := db.GetToken(accessToken1)
+	require.NoError(t, err)
+	assert.True(t, retrievedToken1.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour)))
+	assert.True(t, retrievedToken1.RefreshTokenExpiresAt.Before(time.Now().Add(31*24*time.Hour)))
+
+	// Test 2: Store token with custom refresh token expiration
+	accessToken2, err := generateRandomString(16)
+	require.NoError(t, err)
+	refreshToken2, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	customExpiration := time.Now().Add(7 * 24 * time.Hour) // 7 days
+	tokenData2 := &TokenData{
+		AccessToken:           accessToken2,
+		RefreshToken:          refreshToken2,
+		ClientID:              clientID,
+		UserID:                "test_user_123",
+		GrantID:               grantID,
+		Scope:                 "read write admin",
+		ExpiresAt:             time.Now().Add(1 * time.Hour),
+		RefreshTokenExpiresAt: customExpiration,
+		CreatedAt:             time.Now(),
+		Revoked:               false,
+	}
+
+	err = db.StoreToken(tokenData2)
+	require.NoError(t, err)
+
+	// Verify custom expiration was preserved
+	retrievedToken2, err := db.GetToken(accessToken2)
+	require.NoError(t, err)
+	// Use tolerance-based comparison instead of exact equality due to database precision differences
+	timeDiff := retrievedToken2.RefreshTokenExpiresAt.Sub(customExpiration)
+	assert.True(t, timeDiff >= -time.Second && timeDiff <= time.Second,
+		"Refresh token expiration should be within 1 second of expected time, got difference of %v", timeDiff)
+
+	// Test 3: Test refresh token expiration check
+	expired, err := db.IsRefreshTokenExpired(refreshToken1)
+	require.NoError(t, err)
+	assert.False(t, expired)
+
+	// Test 4: Test cleanup with mixed expiration scenarios
+	// Create token with expired access token but valid refresh token
+	accessToken3, err := generateRandomString(16)
+	require.NoError(t, err)
+	refreshToken3, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	tokenData3 := &TokenData{
+		AccessToken:           accessToken3,
+		RefreshToken:          refreshToken3,
+		ClientID:              clientID,
+		UserID:                "test_user_123",
+		GrantID:               grantID,
+		Scope:                 "read write admin",
+		ExpiresAt:             time.Now().Add(-1 * time.Hour), // Expired access token
+		RefreshTokenExpiresAt: time.Now().Add(1 * time.Hour),  // Valid refresh token
+		CreatedAt:             time.Now().Add(-2 * time.Hour),
+		Revoked:               false,
+	}
+
+	err = db.StoreToken(tokenData3)
+	require.NoError(t, err)
+
+	// Create token with both expired access and refresh tokens
+	accessToken4, err := generateRandomString(16)
+	require.NoError(t, err)
+	refreshToken4, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	tokenData4 := &TokenData{
+		AccessToken:           accessToken4,
+		RefreshToken:          refreshToken4,
+		ClientID:              clientID,
+		UserID:                "test_user_123",
+		GrantID:               grantID,
+		Scope:                 "read write admin",
+		ExpiresAt:             time.Now().Add(-1 * time.Hour), // Expired access token
+		RefreshTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Expired refresh token
+		CreatedAt:             time.Now().Add(-2 * time.Hour),
+		Revoked:               false,
+	}
+
+	err = db.StoreToken(tokenData4)
+	require.NoError(t, err)
+
+	// Run cleanup
+	err = db.CleanupExpiredTokens()
+	require.NoError(t, err)
+
+	// Verify that only the token with both expired access and refresh tokens was cleaned up
+	_, err = db.GetToken(accessToken3) // Should still exist (valid refresh token)
+	assert.NoError(t, err)
+
+	_, err = db.GetToken(accessToken4) // Should be cleaned up (both expired)
+	assert.Error(t, err)
+
+	// Test 5: Test that expired refresh tokens cannot be used
+	// Create a token with expired refresh token
+	accessToken5, err := generateRandomString(16)
+	require.NoError(t, err)
+	refreshToken5, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	tokenData5 := &TokenData{
+		AccessToken:           accessToken5,
+		RefreshToken:          refreshToken5,
+		ClientID:              clientID,
+		UserID:                "test_user_123",
+		GrantID:               grantID,
+		Scope:                 "read write admin",
+		ExpiresAt:             time.Now().Add(1 * time.Hour),
+		RefreshTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Expired refresh token
+		CreatedAt:             time.Now().Add(-2 * time.Hour),
+		Revoked:               false,
+	}
+
+	err = db.StoreToken(tokenData5)
+	require.NoError(t, err)
+
+	// Try to get token by expired refresh token
+	_, err = db.GetTokenByRefreshToken(refreshToken5)
+	assert.Error(t, err, "Should return error when trying to get token by expired refresh token")
+
+	// Verify the token still exists when accessed by access token
+	retrievedToken5, err := db.GetToken(accessToken5)
+	require.NoError(t, err)
+	assert.Equal(t, hashToken(accessToken5), retrievedToken5.AccessToken)
+}
+
+func testDatabaseMigration(t *testing.T, db *Database) {
+	// Test that the migration system works correctly
+
+	// Test 1: Check if column exists function works
+	exists, err := db.columnExists("access_tokens", "refresh_token_expires_at")
+	require.NoError(t, err)
+	assert.True(t, exists, "refresh_token_expires_at column should exist after migration")
+
+	// Test 2: Check that a non-existent column returns false
+	exists, err = db.columnExists("access_tokens", "non_existent_column")
+	require.NoError(t, err)
+	assert.False(t, exists, "non-existent column should return false")
+
+	// Test 3: Test migration idempotency (running migration again should not fail)
+	err = db.migrateAddRefreshTokenExpiration()
+	require.NoError(t, err, "Migration should be idempotent and not fail when run again")
+
+	// Test 4: Verify that existing tokens have refresh token expiration set
+	// Create a grant first
+	grantID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	grant := &Grant{
+		ID:        grantID,
+		ClientID:  "test_client_migration",
+		UserID:    "test_user_migration",
+		Scope:     []string{"read", "write"},
+		Metadata:  map[string]interface{}{"provider": "test"},
+		CreatedAt: time.Now().Unix(),
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}
+
+	err = db.StoreGrant(grant)
+	require.NoError(t, err)
+
+	// Store a token
+	accessToken, err := generateRandomString(16)
+	require.NoError(t, err)
+	refreshToken, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	tokenData := &TokenData{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ClientID:     "test_client_migration",
+		UserID:       "test_user_migration",
+		GrantID:      grantID,
+		Scope:        "read write",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		// RefreshTokenExpiresAt will be set automatically
+	}
+
+	err = db.StoreToken(tokenData)
+	require.NoError(t, err)
+
+	// Verify the token has refresh token expiration set
+	retrievedToken, err := db.GetToken(accessToken)
+	require.NoError(t, err)
+	assert.True(t, retrievedToken.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour)),
+		"Refresh token should expire in approximately 30 days")
+	assert.True(t, retrievedToken.RefreshTokenExpiresAt.Before(time.Now().Add(31*24*time.Hour)),
+		"Refresh token should expire in approximately 30 days")
 }
