@@ -1352,15 +1352,6 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 		return
 	}
 
-	// Check if token is expired
-	if time.Now().After(tokenData.ExpiresAt) {
-		c.JSON(http.StatusBadRequest, OAuthError{
-			Error:            "invalid_grant",
-			ErrorDescription: "Token has expired",
-		})
-		return
-	}
-
 	// Check if token belongs to the requesting client
 	if tokenData.ClientID != clientID {
 		c.JSON(http.StatusBadRequest, OAuthError{
