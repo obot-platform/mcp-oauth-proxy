@@ -764,7 +764,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 		},
 		Props:               props,
 		CreatedAt:           now,
-		ExpiresAt:           now + 600, // 10 minutes for authorization code
+		ExpiresAt:           now + 3600*24*30, // 30 days to expire for grant, same as refresh token
 		CodeChallenge:       authReq.CodeChallenge,
 		CodeChallengeMethod: authReq.CodeChallengeMethod,
 	}
@@ -1336,7 +1336,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 	// Validate refresh token from database
 	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		c.JSON(http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Invalid refresh token",
 		})
@@ -1345,9 +1345,18 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 
 	// Check if token is revoked
 	if tokenData.Revoked {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		c.JSON(http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Token has been revoked",
+		})
+		return
+	}
+
+	// Check if refresh token is expired
+	if time.Now().After(tokenData.RefreshTokenExpiresAt) {
+		c.JSON(http.StatusUnauthorized, OAuthError{
+			Error:            "invalid_grant",
+			ErrorDescription: "Refresh token has expired",
 		})
 		return
 	}
