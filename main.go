@@ -1130,7 +1130,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 
 			// Forward original headers
 			for key, values := range c.Request.Header {
-				if key != "Authorization" { // Don't forward our Bearer token
+				if strings.ToLower(key) != "authorization" { // Don't forward our Bearer token
 					for _, value := range values {
 						req.Header.Add(key, value)
 					}
