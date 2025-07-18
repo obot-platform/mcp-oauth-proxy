@@ -1134,6 +1134,8 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 					for _, value := range values {
 						req.Header.Add(key, value)
 					}
+				} else {
+					req.Header.Del(key)
 				}
 			}
 		},
