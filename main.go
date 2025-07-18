@@ -1125,6 +1125,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 				}
 				if accessToken, ok := tokenInfo.Props["access_token"].(string); ok {
 					req.Header.Set("X-Forwarded-Access-Token", accessToken)
+					fmt.Println(accessToken)
 				}
 			}
 
