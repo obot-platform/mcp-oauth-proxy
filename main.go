@@ -327,6 +327,85 @@ func (p *OAuthProxy) decryptPropsIfNeeded(props map[string]interface{}) (map[str
 	return result, nil
 }
 
+// updateGrant updates a grant with new token information
+func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.TokenInfo, newTokenInfo *providers.TokenInfo) error {
+	// Get the existing grant
+	grant, err := p.db.GetGrant(grantID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get grant: %w", err)
+	}
+
+	// Prepare sensitive props data
+	sensitiveProps := map[string]interface{}{
+		"access_token":  newTokenInfo.AccessToken,
+		"refresh_token": newTokenInfo.RefreshToken,
+		"expires_at":    newTokenInfo.ExpireAt,
+	}
+
+	// Add existing user info if available
+	if grant.Props != nil {
+		if email, ok := grant.Props["email"].(string); ok {
+			sensitiveProps["email"] = email
+		}
+		if name, ok := grant.Props["name"].(string); ok {
+			sensitiveProps["name"] = name
+		}
+		if userID, ok := grant.Props["user_id"].(string); ok {
+			sensitiveProps["user_id"] = userID
+		}
+	}
+
+	// use old refresh token in case new one is not provided
+	if sensitiveProps["refresh_token"] == "" {
+		sensitiveProps["refresh_token"] = oldTokenInfo.Props["refresh_token"]
+	}
+
+	// Initialize props map
+	props := make(map[string]interface{})
+
+	// Check if encryption is enabled
+	if p.encryptionKey != "" {
+		// Decode the encryption key from base64
+		encryptionKey, err := base64.StdEncoding.DecodeString(p.encryptionKey)
+		if err != nil {
+			return fmt.Errorf("failed to decode encryption key: %w", err)
+		}
+
+		// Validate key length (must be 32 bytes for AES-256)
+		if len(encryptionKey) != 32 {
+			return fmt.Errorf("invalid encryption key length: %d bytes (expected 32)", len(encryptionKey))
+		}
+
+		// Encrypt the sensitive props data
+		encryptedProps, err := encryptData(sensitiveProps, encryptionKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt props data: %w", err)
+		}
+
+		// Store encrypted data
+		props["encrypted_data"] = encryptedProps.Data
+		props["iv"] = encryptedProps.IV
+		props["algorithm"] = encryptedProps.Algorithm
+		props["encrypted"] = true
+	} else {
+		// Store data in plain text if no encryption key is provided
+		for key, value := range sensitiveProps {
+			props[key] = value
+		}
+		props["encrypted"] = false
+	}
+
+	// Update the grant with new props
+	grant.Props = props
+
+	// Update the grant in the database
+	if err := p.db.UpdateGrant(grant); err != nil {
+		return fmt.Errorf("failed to update grant: %w", err)
+	}
+
+	return nil
+}
+
 // databaseAdapter adapts the database to the tokens.Database interface
 type databaseAdapter struct {
 	db *database.Database
@@ -984,11 +1063,18 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 						return
 					}
 
-					// Update the token info with the new access token
-					tokenInfo.Props["access_token"] = newTokenInfo.AccessToken
-					if newTokenInfo.RefreshToken != "" {
-						tokenInfo.Props["refresh_token"] = newTokenInfo.RefreshToken
+					// Update the grant with new token information
+					if err := p.updateGrant(tokenInfo.GrantID, tokenInfo.UserID, tokenInfo, newTokenInfo); err != nil {
+						log.Printf("Failed to update grant: %v", err)
+						c.JSON(http.StatusInternalServerError, gin.H{
+							"error":             "server_error",
+							"error_description": "Failed to update grant with new token",
+						})
+						return
 					}
+
+					// Update the token info with the new access token for the current request
+					tokenInfo.Props["access_token"] = newTokenInfo.AccessToken
 
 					log.Printf("Successfully refreshed access token")
 				}
@@ -1042,6 +1128,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("Proxy error: %v", err)
+			c.Abort()
 		},
 	}
 

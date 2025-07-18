@@ -23,6 +23,7 @@ type Database interface {
 
 type TokenClaims struct {
 	UserID    string                 `json:"user_id"`
+	GrantID   string                 `json:"grant_id"`
 	Props     map[string]interface{} `json:"props,omitempty"`
 	ExpiresAt time.Time              `json:"expires_at"`
 }
@@ -95,6 +96,7 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 	// Create TokenClaims with the grant's props
 	claims := &TokenClaims{
 		UserID:    userID,
+		GrantID:   grantID,
 		Props:     grant.Props,
 		ExpiresAt: tokenData.ExpiresAt,
 	}
@@ -111,6 +113,7 @@ func (tm *TokenManager) GetTokenInfo(tokenString string) (*TokenInfo, error) {
 
 	return &TokenInfo{
 		UserID:    claims.UserID,
+		GrantID:   claims.GrantID,
 		Props:     claims.Props,
 		ExpiresAt: claims.ExpiresAt,
 	}, nil
@@ -119,6 +122,7 @@ func (tm *TokenManager) GetTokenInfo(tokenString string) (*TokenInfo, error) {
 // TokenInfo represents token information
 type TokenInfo struct {
 	UserID    string
+	GrantID   string
 	Props     map[string]interface{}
 	ExpiresAt time.Time
 }
