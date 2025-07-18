@@ -499,6 +499,52 @@ func (d *Database) StoreGrant(grant *Grant) error {
 	return err
 }
 
+// UpdateGrant updates an existing grant's properties
+func (d *Database) UpdateGrant(grant *Grant) error {
+	var query string
+	if d.dbType == "postgres" {
+		query = `
+			UPDATE grants 
+			SET scope = $1, metadata = $2, props = $3, expires_at = $4
+			WHERE id = $5 AND user_id = $6
+		`
+	} else {
+		query = `
+			UPDATE grants 
+			SET scope = ?, metadata = ?, props = ?, expires_at = ?
+			WHERE id = ? AND user_id = ?
+		`
+	}
+
+	scope, _ := json.Marshal(grant.Scope)
+	metadata, _ := json.Marshal(grant.Metadata)
+	props, _ := json.Marshal(grant.Props)
+
+	result, err := d.db.Exec(query,
+		scope,
+		metadata,
+		props,
+		grant.ExpiresAt,
+		grant.ID,
+		grant.UserID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Check if any rows were affected
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("grant not found: id=%s, user_id=%s", grant.ID, grant.UserID)
+	}
+
+	return nil
+}
+
 // GetGrant retrieves a grant by ID and user ID
 func (d *Database) GetGrant(grantID, userID string) (*Grant, error) {
 	var query string
