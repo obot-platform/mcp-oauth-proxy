@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -429,6 +430,7 @@ type OAuthProxy struct {
 	provider      string
 	encryptionKey string
 	resourceName  string
+	lock          sync.Mutex
 }
 
 func NewOAuthProxy() (*OAuthProxy, error) {
@@ -1016,6 +1018,9 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 			expiresAt, ok := tokenInfo.Props["expires_at"].(float64)
 			if ok && expiresAt > 0 {
 				if time.Now().Add(5 * time.Minute).After(time.Unix(int64(expiresAt), 0)) {
+					// when refreshing token, we need to lock the database to avoid race conditions
+					// otherwise we could get save the old access token into the database when another refresh process is running
+					p.lock.Lock()
 					log.Printf("Access token is expired or will expire soon, attempting to refresh")
 
 					// Get the refresh token
@@ -1026,6 +1031,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 							"error":             "invalid_token",
 							"error_description": "Access token expired and no refresh token available",
 						})
+						p.lock.Unlock()
 						return
 					}
 
@@ -1037,6 +1043,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 							"error":             "server_error",
 							"error_description": "Failed to refresh token",
 						})
+						p.lock.Unlock()
 						return
 					}
 
@@ -1049,6 +1056,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 							"error":             "server_error",
 							"error_description": "OAuth credentials not configured",
 						})
+						p.lock.Unlock()
 						return
 					}
 
@@ -1060,6 +1068,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 							"error":             "invalid_token",
 							"error_description": "Failed to refresh access token",
 						})
+						p.lock.Unlock()
 						return
 					}
 
@@ -1070,11 +1079,13 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 							"error":             "server_error",
 							"error_description": "Failed to update grant with new token",
 						})
+						p.lock.Unlock()
 						return
 					}
 
 					// Update the token info with the new access token for the current request
 					tokenInfo.Props["access_token"] = newTokenInfo.AccessToken
+					p.lock.Unlock()
 
 					log.Printf("Successfully refreshed access token")
 				}
