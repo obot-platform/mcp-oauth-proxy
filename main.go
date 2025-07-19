@@ -1130,6 +1130,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 			}
 
 			// Forward original headers
+			fmt.Println(c.Request.Header)
 			for key, values := range c.Request.Header {
 				if strings.ToLower(key) != "authorization" { // Don't forward our Bearer token
 					for _, value := range values {
@@ -1142,7 +1143,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("Proxy error: %v", err)
-			c.Abort()
+			c.AbortWithStatus(http.StatusBadGateway)
 		},
 	}
 
