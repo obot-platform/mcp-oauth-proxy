@@ -1125,19 +1125,18 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 				}
 				if accessToken, ok := tokenInfo.Props["access_token"].(string); ok {
 					req.Header.Set("X-Forwarded-Access-Token", accessToken)
-					fmt.Println(accessToken)
 				}
 			}
 
 			// Forward original headers
-			fmt.Println(c.Request.Header)
 			for key, values := range c.Request.Header {
-				if strings.ToLower(key) != "authorization" { // Don't forward our Bearer token
+				lowerCaseKey := strings.ToLower(key)
+				if lowerCaseKey == "authorization" {
+					req.Header.Del(key)
+				} else {
 					for _, value := range values {
 						req.Header.Add(key, value)
 					}
-				} else {
-					req.Header.Del(key)
 				}
 			}
 		},
