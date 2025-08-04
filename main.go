@@ -527,6 +527,9 @@ func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
 		r.Use(p.rateLimitMiddleware())
 	}
 
+	// Health endpoint
+	r.GET("/health", p.healthHandler)
+
 	// OAuth endpoints
 	r.GET("/authorize", p.authorizeHandler)
 	r.POST("/authorize", p.authorizeHandler)
@@ -557,6 +560,10 @@ func (p *OAuthProxy) rateLimitMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func (p *OAuthProxy) healthHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
