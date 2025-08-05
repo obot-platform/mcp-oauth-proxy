@@ -28,8 +28,9 @@ import (
 // Config represents the YAML configuration structure
 type Config struct {
 	Server struct {
-		Port int    `yaml:"port"`
-		Host string `yaml:"host"`
+		Port       int    `yaml:"port"`
+		Host       string `yaml:"host"`
+		PathPrefix string `yaml:"path_prefix"`
 	} `yaml:"server"`
 
 	Database struct {
@@ -430,6 +431,7 @@ type OAuthProxy struct {
 	provider      string
 	encryptionKey string
 	resourceName  string
+	pathPrefix    string
 	lock          sync.Mutex
 }
 
@@ -490,6 +492,15 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 		RegistrationEndpointAuthMethodsSupported: []string{"client_secret_post"},
 	}
 
+	// Get path prefix from environment variable
+	pathPrefix := os.Getenv("PATH_PREFIX")
+	if pathPrefix != "" && !strings.HasPrefix(pathPrefix, "/") {
+		pathPrefix = "/" + pathPrefix
+	}
+	if pathPrefix != "" && strings.HasSuffix(pathPrefix, "/") {
+		pathPrefix = strings.TrimSuffix(pathPrefix, "/")
+	}
+
 	return &OAuthProxy{
 		metadata:      metadata,
 		db:            db,
@@ -499,6 +510,7 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 		provider:      provider,
 		resourceName:  "MCP Tools",
 		encryptionKey: os.Getenv("ENCRYPTION_KEY"),
+		pathPrefix:    pathPrefix,
 	}, nil
 }
 
@@ -511,7 +523,24 @@ func (p *OAuthProxy) getBaseURL(c *gin.Context) string {
 	return fmt.Sprintf("%s://%s", scheme, c.Request.Host)
 }
 
+// getEndpointURL returns the full URL for an endpoint, including the path prefix
+func (p *OAuthProxy) getEndpointURL(c *gin.Context, path string) string {
+	baseURL := p.getBaseURL(c)
+	if p.pathPrefix == "" {
+		return fmt.Sprintf("%s%s", baseURL, path)
+	}
+	return fmt.Sprintf("%s%s%s", baseURL, p.pathPrefix, path)
+}
+
 func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
+	// Helper function to add prefix to paths
+	addPrefix := func(path string) string {
+		if p.pathPrefix == "" {
+			return path
+		}
+		return p.pathPrefix + path
+	}
+
 	// Global CORS configuration
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
@@ -522,7 +551,7 @@ func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Health endpoint
+	// Health endpoint (no prefix)
 	r.GET("/health", p.healthHandler)
 
 	// Rate limiting middleware
@@ -530,21 +559,21 @@ func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
 		r.Use(p.rateLimitMiddleware())
 	}
 
-	// OAuth endpoints
-	r.GET("/authorize", p.authorizeHandler)
-	r.POST("/authorize", p.authorizeHandler)
-	r.GET("/callback", p.callbackHandler)
-	r.POST("/token", p.tokenHandler)
-	r.POST("/revoke", p.revokeHandler)
-	r.POST("/register", p.registerHandler)
+	// OAuth endpoints (with prefix)
+	r.GET(addPrefix("/authorize"), p.authorizeHandler)
+	r.POST(addPrefix("/authorize"), p.authorizeHandler)
+	r.GET(addPrefix("/callback"), p.callbackHandler)
+	r.POST(addPrefix("/token"), p.tokenHandler)
+	r.POST(addPrefix("/revoke"), p.revokeHandler)
+	r.POST(addPrefix("/register"), p.registerHandler)
 
-	// Metadata endpoints
-	r.GET("/.well-known/oauth-authorization-server", p.oauthMetadataHandler)
-	r.GET("/.well-known/oauth-protected-resource/mcp", p.protectedResourceMetadataHandler)
+	// Metadata endpoints (with prefix)
+	r.GET(addPrefix("/.well-known/oauth-authorization-server"), p.oauthMetadataHandler)
+	r.GET(addPrefix("/.well-known/oauth-protected-resource/mcp"), p.protectedResourceMetadataHandler)
 
-	// Add protected resource endpoints
-	r.Any("/mcp", p.validateTokenMiddleware(), p.mcpProxyHandler)
-	r.Any("/mcp/*path", p.validateTokenMiddleware(), p.mcpProxyHandler)
+	// Add protected resource endpoints (with prefix)
+	r.Any(addPrefix("/mcp"), p.validateTokenMiddleware(), p.mcpProxyHandler)
+	r.Any(addPrefix("/mcp/*path"), p.validateTokenMiddleware(), p.mcpProxyHandler)
 }
 
 func (p *OAuthProxy) rateLimitMiddleware() gin.HandlerFunc {
@@ -918,16 +947,16 @@ func (p *OAuthProxy) oauthMetadataHandler(c *gin.Context) {
 	metadata := &OAuthMetadata{
 		Issuer:                                   baseURL,
 		ServiceDocumentation:                     p.metadata.ServiceDocumentation,
-		AuthorizationEndpoint:                    fmt.Sprintf("%s/authorize", baseURL),
+		AuthorizationEndpoint:                    p.getEndpointURL(c, "/authorize"),
 		ResponseTypesSupported:                   p.metadata.ResponseTypesSupported,
 		CodeChallengeMethodsSupported:            p.metadata.CodeChallengeMethodsSupported,
-		TokenEndpoint:                            fmt.Sprintf("%s/token", baseURL),
+		TokenEndpoint:                            p.getEndpointURL(c, "/token"),
 		TokenEndpointAuthMethodsSupported:        p.metadata.TokenEndpointAuthMethodsSupported,
 		GrantTypesSupported:                      p.metadata.GrantTypesSupported,
 		ScopesSupported:                          p.metadata.ScopesSupported,
-		RevocationEndpoint:                       fmt.Sprintf("%s/revoke", baseURL),
+		RevocationEndpoint:                       p.getEndpointURL(c, "/revoke"),
 		RevocationEndpointAuthMethodsSupported:   p.metadata.RevocationEndpointAuthMethodsSupported,
-		RegistrationEndpoint:                     fmt.Sprintf("%s/register", baseURL),
+		RegistrationEndpoint:                     p.getEndpointURL(c, "/register"),
 		RegistrationEndpointAuthMethodsSupported: p.metadata.RegistrationEndpointAuthMethodsSupported,
 	}
 
@@ -936,7 +965,7 @@ func (p *OAuthProxy) oauthMetadataHandler(c *gin.Context) {
 
 func (p *OAuthProxy) protectedResourceMetadataHandler(c *gin.Context) {
 	metadata := OAuthProtectedResourceMetadata{
-		Resource:              fmt.Sprintf("%s/mcp", p.getBaseURL(c)),
+		Resource:              p.getEndpointURL(c, "/mcp"),
 		AuthorizationServers:  []string{p.getBaseURL(c)},
 		Scopes:                p.metadata.ScopesSupported,
 		ResourceName:          p.resourceName,
@@ -951,7 +980,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			// Return 401 with proper WWW-Authenticate header
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+			resourceMetadataUrl := p.getEndpointURL(c, "/.well-known/oauth-protected-resource/mcp")
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="%s"`, resourceMetadataUrl)
 			c.Header("WWW-Authenticate", wwwAuthValue)
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -965,7 +994,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		// Parse Authorization header
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+			resourceMetadataUrl := p.getEndpointURL(c, "/.well-known/oauth-protected-resource/mcp")
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid Authorization header format, expected 'Bearer TOKEN'", resource_metadata="%s"`, resourceMetadataUrl)
 			c.Header("WWW-Authenticate", wwwAuthValue)
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -980,7 +1009,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 
 		tokenInfo, err := p.tokenManager.GetTokenInfo(token)
 		if err != nil {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+			resourceMetadataUrl := p.getEndpointURL(c, "/.well-known/oauth-protected-resource/mcp")
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid or expired token", resource_metadata="%s"`, resourceMetadataUrl)
 			c.Header("WWW-Authenticate", wwwAuthValue)
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -995,7 +1024,7 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		if tokenInfo.Props != nil {
 			decryptedProps, err := p.decryptPropsIfNeeded(tokenInfo.Props)
 			if err != nil {
-				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+				resourceMetadataUrl := p.getEndpointURL(c, "/.well-known/oauth-protected-resource/mcp")
 				wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Failed to decrypt token data", resource_metadata="%s"`, resourceMetadataUrl)
 				c.Header("WWW-Authenticate", wwwAuthValue)
 				c.JSON(http.StatusUnauthorized, gin.H{
