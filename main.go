@@ -522,13 +522,13 @@ func (p *OAuthProxy) setupRoutes(r *gin.Engine) {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// Health endpoint
+	r.GET("/health", p.healthHandler)
+
 	// Rate limiting middleware
 	if p.rateLimiter != nil {
 		r.Use(p.rateLimitMiddleware())
 	}
-
-	// Health endpoint
-	r.GET("/health", p.healthHandler)
 
 	// OAuth endpoints
 	r.GET("/authorize", p.authorizeHandler)
