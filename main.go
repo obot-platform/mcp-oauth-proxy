@@ -454,7 +454,7 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	// Initialize rate limiter
 	rateLimiter := NewRateLimiter(
 		time.Duration(15)*time.Minute,
-		100,
+		5000,
 	)
 
 	// Initialize provider manager
