@@ -2,8 +2,8 @@ package main
 
 import (
 	"log"
+	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/proxy"
 )
 
@@ -18,11 +18,10 @@ func main() {
 		}
 	}()
 
-	// Setup Gin router
-	r := gin.Default()
-	proxy.SetupRoutes(r)
+	// Get HTTP handler
+	handler := proxy.GetHandler()
 
 	// Start server
 	log.Printf("Starting OAuth proxy server on localhost:8080")
-	log.Fatal(r.Run(":8080"))
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
