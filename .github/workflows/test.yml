@@ -129,13 +129,13 @@ jobs:
           retention-days: 30
 
       - name: Run SQLite-specific database tests
-        run: go test -v ./database -run TestSQLiteDatabase
+        run: go test -v ./pkg/db -run TestSQLiteDatabase
 
       - name: Run all database tests with SQLite
-        run: go test -v ./database
+        run: go test -v ./pkg/db
 
       - name: Test SQLite fallback behavior
         run: |
           # Test that the application uses SQLite when DATABASE_DSN is not set
           unset DATABASE_DSN
-          go test -v ./database -run TestSQLiteDatabase
+          go test -v ./pkg/db -run TestSQLiteDatabase
