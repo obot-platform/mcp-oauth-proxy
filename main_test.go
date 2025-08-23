@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/proxy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,8 +19,7 @@ func TestIntegrationFlow(t *testing.T) {
 		t.Skip("Skipping integration tests in short mode")
 	}
 
-	// Set Gin to test mode
-	gin.SetMode(gin.TestMode)
+	// Note: Using standard HTTP handlers instead of Gin
 
 	// Set required environment variables for testing
 	oldVars := map[string]string{
@@ -36,7 +34,7 @@ func TestIntegrationFlow(t *testing.T) {
 	// Set test environment variables
 	testEnvVars := map[string]string{
 		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret", 
+		"OAUTH_CLIENT_SECRET": "test_client_secret",
 		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
 		"SCOPES_SUPPORTED":    "openid,profile,email",
 		"MCP_SERVER_URL":      "http://localhost:8081",
@@ -55,9 +53,9 @@ func TestIntegrationFlow(t *testing.T) {
 	defer func() {
 		for key, value := range oldVars {
 			if value != "" {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			} else {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key)
 			}
 		}
 	}()
@@ -73,15 +71,14 @@ func TestIntegrationFlow(t *testing.T) {
 		}
 	}()
 
-	// Setup routes
-	router := gin.New()
-	oauthProxy.SetupRoutes(router)
+	// Get HTTP handler
+	handler := oauthProxy.GetHandler()
 
 	// Test health endpoint
 	t.Run("HealthEndpoint", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/health", nil)
-		router.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "ok")
@@ -91,7 +88,7 @@ func TestIntegrationFlow(t *testing.T) {
 	t.Run("OAuthMetadata", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
-		router.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "authorization_endpoint")
@@ -102,7 +99,7 @@ func TestIntegrationFlow(t *testing.T) {
 	t.Run("ProtectedResourceMetadata", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp", nil)
-		router.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "resource")
@@ -113,7 +110,7 @@ func TestIntegrationFlow(t *testing.T) {
 	t.Run("MCPEndpointRequiresAuth", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/mcp", nil)
-		router.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Bearer")
@@ -123,7 +120,7 @@ func TestIntegrationFlow(t *testing.T) {
 	t.Run("AuthorizationEndpointRedirect", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/authorize?response_type=code&client_id=test&redirect_uri=http://localhost:8080/callback&scope=openid", nil)
-		router.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 
 		// Should get a redirect to the OAuth provider or an error about invalid client
 		assert.True(t, w.Code == http.StatusFound || w.Code == http.StatusBadRequest)
@@ -159,9 +156,9 @@ func TestOAuthProxyCreation(t *testing.T) {
 	defer func() {
 		for key, value := range oldVars {
 			if value != "" {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			} else {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key)
 			}
 		}
 	}()
@@ -171,11 +168,11 @@ func TestOAuthProxyCreation(t *testing.T) {
 	require.NoError(t, err, "Should be able to create OAuth proxy with valid environment")
 	require.NotNil(t, oauthProxy, "OAuth proxy should not be nil")
 
-	// Test that we can set up routes without error
-	router := gin.New()
+	// Test that we can get handler without error
 	require.NotPanics(t, func() {
-		oauthProxy.SetupRoutes(router)
-	}, "SetupRoutes should not panic")
+		handler := oauthProxy.GetHandler()
+		require.NotNil(t, handler)
+	}, "GetHandler should not panic and should return non-nil handler")
 
 	// Clean up
 	err = oauthProxy.Close()
@@ -189,7 +186,7 @@ func TestOAuthProxyStart(t *testing.T) {
 
 	// Set minimal required environment
 	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id", 
+		"OAUTH_CLIENT_ID":     "test_client_id",
 		"OAUTH_CLIENT_SECRET": "test_client_secret",
 		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
 		"SCOPES_SUPPORTED":    "openid,profile,email",
@@ -208,9 +205,9 @@ func TestOAuthProxyStart(t *testing.T) {
 	defer func() {
 		for key, value := range oldVars {
 			if value != "" {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			} else {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key)
 			}
 		}
 	}()
@@ -218,7 +215,9 @@ func TestOAuthProxyStart(t *testing.T) {
 	// Create OAuth proxy
 	oauthProxy, err := proxy.NewOAuthProxy()
 	require.NoError(t, err)
-	defer oauthProxy.Close()
+	defer func() {
+		_ = oauthProxy.Close()
+	}()
 
 	// Test starting and stopping the proxy
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

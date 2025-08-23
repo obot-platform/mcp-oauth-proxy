@@ -14,12 +14,12 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
+	"github.com/gorilla/handlers"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/db"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
@@ -41,6 +41,47 @@ type OAuthProxy struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// JSON is a helper function to write JSON responses
+func JSON(w http.ResponseWriter, statusCode int, obj interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if obj != nil {
+		if err := json.NewEncoder(w).Encode(obj); err != nil {
+			log.Printf("Error encoding JSON response: %v", err)
+			// Write error response if encoding fails
+			errText, _ := json.Marshal(map[string]string{
+				"error":             "internal_server_error",
+				"error_description": "Failed to encode JSON response",
+				"error_detail":      err.Error(),
+			})
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(errText)
+		}
+	}
+}
+
+// getClientIP extracts the client IP from the request
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header first
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Get the first IP in the comma-separated list
+		ifs := strings.Split(xff, ",")
+		return strings.TrimSpace(ifs[0])
+	}
+
+	// Check X-Real-IP header
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+
+	// Fall back to RemoteAddr
+	ip := r.RemoteAddr
+	if colonIndex := strings.LastIndex(ip, ":"); colonIndex != -1 {
+		ip = ip[:colonIndex]
+	}
+	return ip
 }
 
 func NewOAuthProxy() (*OAuthProxy, error) {
@@ -141,83 +182,101 @@ func (p *OAuthProxy) Start(ctx context.Context) error {
 }
 
 // getBaseURL returns the base URL from the request
-func (p *OAuthProxy) getBaseURL(c *gin.Context) string {
+func (p *OAuthProxy) getBaseURL(r *http.Request) string {
 	scheme := "http"
-	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+	return fmt.Sprintf("%s://%s", scheme, r.Host)
 }
 
-func (p *OAuthProxy) SetupRoutes(r *gin.Engine) {
-	// Global CORS configuration
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "mcp-protocol-version", "*"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
-
+func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	// Health endpoint
-	r.GET("/health", p.healthHandler)
-
-	// Rate limiting middleware
-	if p.rateLimiter != nil {
-		r.Use(p.rateLimitMiddleware())
-	}
+	mux.HandleFunc("/health", p.withCORS(p.healthHandler))
 
 	// OAuth endpoints
-	r.GET("/authorize", p.authorizeHandler)
-	r.POST("/authorize", p.authorizeHandler)
-	r.GET("/callback", p.callbackHandler)
-	r.POST("/token", p.tokenHandler)
-	r.POST("/revoke", p.revokeHandler)
-	r.POST("/register", p.registerHandler)
+	mux.HandleFunc("/authorize", p.withCORS(p.withRateLimit(p.authorizeHandler)))
+	mux.HandleFunc("/callback", p.withCORS(p.withRateLimit(p.callbackHandler)))
+	mux.HandleFunc("/token", p.withCORS(p.withRateLimit(p.tokenHandler)))
+	mux.HandleFunc("/revoke", p.withCORS(p.withRateLimit(p.revokeHandler)))
+	mux.HandleFunc("/register", p.withCORS(p.withRateLimit(p.registerHandler)))
 
 	// Metadata endpoints
-	r.GET("/.well-known/oauth-authorization-server", p.oauthMetadataHandler)
-	r.GET("/.well-known/oauth-protected-resource/mcp", p.protectedResourceMetadataHandler)
+	mux.HandleFunc("/.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
+	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", p.withCORS(p.protectedResourceMetadataHandler))
 
-	// Add protected resource endpoints
-	r.Any("/mcp", p.validateTokenMiddleware(), p.mcpProxyHandler)
-	r.Any("/mcp/*path", p.validateTokenMiddleware(), p.mcpProxyHandler)
+	// Protected resource endpoints
+	mux.HandleFunc("/mcp", p.withCORS(p.withRateLimit(p.withTokenValidation(p.mcpProxyHandler))))
+	mux.HandleFunc("/mcp/{path...}", p.withCORS(p.withRateLimit(p.withTokenValidation(p.mcpProxyHandler))))
 }
 
-func (p *OAuthProxy) rateLimitMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		clientIP := c.ClientIP()
-		if !p.rateLimiter.Allow(clientIP) {
-			c.JSON(http.StatusTooManyRequests, OAuthError{
-				Error:            "too_many_requests",
-				ErrorDescription: "Rate limit exceeded",
-			})
-			c.Abort()
+// GetHandler returns an http.Handler for the OAuth proxy
+func (p *OAuthProxy) GetHandler() http.Handler {
+	mux := http.NewServeMux()
+	p.SetupRoutes(mux)
+
+	// Wrap with logging middleware
+	loggedHandler := handlers.LoggingHandler(os.Stdout, mux)
+
+	return loggedHandler
+}
+
+// withCORS wraps a handler with CORS headers
+func (p *OAuthProxy) withCORS(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With, mcp-protocol-version")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Length")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", strconv.Itoa(int((12 * time.Hour).Seconds())))
+
+		// Handle preflight OPTIONS request
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		c.Next()
+
+		next(w, r)
 	}
 }
 
-func (p *OAuthProxy) healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+// withRateLimit wraps a handler with rate limiting
+func (p *OAuthProxy) withRateLimit(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p.rateLimiter != nil {
+			clientIP := getClientIP(r)
+			if !p.rateLimiter.Allow(clientIP) {
+				JSON(w, http.StatusTooManyRequests, OAuthError{
+					Error:            "too_many_requests",
+					ErrorDescription: "Rate limit exceeded",
+				})
+				return
+			}
+		}
+		next(w, r)
+	}
 }
 
-func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
+func (p *OAuthProxy) healthHandler(w http.ResponseWriter, r *http.Request) {
+	JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 	// Get parameters from query or form
 	var params url.Values
-	if c.Request.Method == "GET" {
-		params = c.Request.URL.Query()
+	if r.Method == "GET" {
+		params = r.URL.Query()
 	} else {
-		if err := c.Request.ParseForm(); err != nil {
-			c.JSON(http.StatusBadRequest, OAuthError{
+		if err := r.ParseForm(); err != nil {
+			JSON(w, http.StatusBadRequest, OAuthError{
 				Error:            "invalid_request",
 				ErrorDescription: "Failed to parse form data",
 			})
 			return
 		}
-		params = c.Request.Form
+		params = r.Form
 	}
 
 	// Parse authorization request
@@ -237,7 +296,7 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 
 	// Validate required parameters
 	if authReq.ResponseType == "" || authReq.ClientID == "" || authReq.RedirectURI == "" {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Missing required parameters",
 		})
@@ -246,7 +305,7 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 
 	// Validate response type
 	if authReq.ResponseType != "code" && authReq.ResponseType != "token" {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "unsupported_response_type",
 			ErrorDescription: "Only 'code' and 'token' response types are supported",
 		})
@@ -256,7 +315,7 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 	// Validate client exists
 	clientInfo, err := p.db.GetClient(authReq.ClientID)
 	if err != nil || clientInfo == nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client not found",
 		})
@@ -272,7 +331,7 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 		}
 	}
 	if !validRedirect {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid redirect URI",
 		})
@@ -284,7 +343,7 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 	// Get the provider
 	provider, err := p.providers.GetProvider(providerName)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: fmt.Sprintf("Provider '%s' not available", providerName),
 		})
@@ -297,7 +356,7 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 
 	// Check if provider is configured
 	if clientID == "" || clientSecret == "" {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "OAuth provider not configured",
 		})
@@ -306,14 +365,15 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 
 	stateData, err := json.Marshal(authReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to marshal state data",
 		})
+		return
 	}
 
 	encodedState := base64.URLEncoding.EncodeToString(stateData)
-	redirectURI := fmt.Sprintf("%s/callback", p.getBaseURL(c))
+	redirectURI := fmt.Sprintf("%s/callback", p.getBaseURL(r))
 
 	// Generate authorization URL with the provider
 	authURL := provider.GetAuthorizationURL(
@@ -324,19 +384,19 @@ func (p *OAuthProxy) authorizeHandler(c *gin.Context) {
 	)
 
 	// Redirect to the provider's authorization URL
-	c.Redirect(http.StatusFound, authURL)
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-func (p *OAuthProxy) callbackHandler(c *gin.Context) {
+func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Handle OAuth callback from external providers
-	code := c.Query("code")
-	state := c.Query("state")
-	error := c.Query("error")
-	errorDescription := c.Query("error_description")
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	error := r.URL.Query().Get("error")
+	errorDescription := r.URL.Query().Get("error_description")
 
 	// Check for OAuth errors
 	if error != "" {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            error,
 			ErrorDescription: errorDescription,
 		})
@@ -345,7 +405,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 
 	// Validate required parameters
 	if code == "" {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Missing authorization code",
 		})
@@ -355,14 +415,14 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	var authReq AuthRequest
 	stateData, err := base64.URLEncoding.DecodeString(state)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid state parameter",
 		})
 		return
 	}
 	if err := json.Unmarshal(stateData, &authReq); err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid state parameter",
 		})
@@ -372,7 +432,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	// Get the provider
 	provider, err := p.providers.GetProvider(p.provider)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Provider not available",
 		})
@@ -382,13 +442,13 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	// Get provider credentials
 	clientID := os.Getenv("OAUTH_CLIENT_ID")
 	clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
-	redirectURI := fmt.Sprintf("%s/callback", p.getBaseURL(c))
+	redirectURI := fmt.Sprintf("%s/callback", p.getBaseURL(r))
 
 	// Exchange code for tokens
-	tokenInfo, err := provider.ExchangeCodeForToken(c.Request.Context(), code, clientID, clientSecret, redirectURI)
+	tokenInfo, err := provider.ExchangeCodeForToken(r.Context(), code, clientID, clientSecret, redirectURI)
 	if err != nil {
 		log.Printf("Failed to exchange code for token: %v", err)
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Failed to exchange authorization code",
 		})
@@ -396,10 +456,10 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	}
 
 	// Get user info from the provider
-	userInfo, err := provider.GetUserInfo(c.Request.Context(), tokenInfo.AccessToken)
+	userInfo, err := provider.GetUserInfo(r.Context(), tokenInfo.AccessToken)
 	if err != nil {
 		log.Printf("Failed to get user info: %v", err)
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Failed to get user information",
 		})
@@ -409,7 +469,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	// Create a grant for this user
 	grantID, err := generateRandomString(16)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to generate grant ID",
 		})
@@ -435,7 +495,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 		encryptionKey, err := base64.StdEncoding.DecodeString(p.encryptionKey)
 		if err != nil {
 			log.Printf("Failed to decode encryption key: %v", err)
-			c.JSON(http.StatusInternalServerError, OAuthError{
+			JSON(w, http.StatusInternalServerError, OAuthError{
 				Error:            "server_error",
 				ErrorDescription: "Invalid encryption key configuration",
 			})
@@ -445,7 +505,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 		// Validate key length (must be 32 bytes for AES-256)
 		if len(encryptionKey) != 32 {
 			log.Printf("Invalid encryption key length: %d bytes (expected 32)", len(encryptionKey))
-			c.JSON(http.StatusInternalServerError, OAuthError{
+			JSON(w, http.StatusInternalServerError, OAuthError{
 				Error:            "server_error",
 				ErrorDescription: "Invalid encryption key length",
 			})
@@ -456,7 +516,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 		encryptedProps, err := encryptData(sensitiveProps, encryptionKey)
 		if err != nil {
 			log.Printf("Failed to encrypt props data: %v", err)
-			c.JSON(http.StatusInternalServerError, OAuthError{
+			JSON(w, http.StatusInternalServerError, OAuthError{
 				Error:            "server_error",
 				ErrorDescription: "Failed to encrypt sensitive data",
 			})
@@ -498,7 +558,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	// Store the grant
 	if err := p.db.StoreGrant(grant); err != nil {
 		log.Printf("Failed to store grant: %v", err)
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store grant",
 		})
@@ -508,7 +568,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	// Generate authorization code
 	randomPart, err := generateRandomString(32)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to generate authorization code",
 		})
@@ -519,7 +579,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	// Store the authorization code
 	if err := p.db.StoreAuthCode(authCode, grantID, userInfo.ID); err != nil {
 		log.Printf("Failed to store authorization code: %v", err)
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store authorization code",
 		})
@@ -531,7 +591,7 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 
 	parsedURL, err := url.Parse(redirectURL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Invalid redirect URL",
 		})
@@ -546,11 +606,12 @@ func (p *OAuthProxy) callbackHandler(c *gin.Context) {
 	parsedURL.RawQuery = query.Encode()
 
 	// Redirect back to the client
-	c.Redirect(http.StatusFound, parsedURL.String())
+	w.Header().Set("Location", parsedURL.String())
+	w.WriteHeader(http.StatusFound)
 }
 
-func (p *OAuthProxy) oauthMetadataHandler(c *gin.Context) {
-	baseURL := p.getBaseURL(c)
+func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	baseURL := p.getBaseURL(r)
 
 	// Create dynamic metadata based on the request
 	metadata := &OAuthMetadata{
@@ -569,48 +630,46 @@ func (p *OAuthProxy) oauthMetadataHandler(c *gin.Context) {
 		RegistrationEndpointAuthMethodsSupported: p.metadata.RegistrationEndpointAuthMethodsSupported,
 	}
 
-	c.JSON(http.StatusOK, metadata)
+	JSON(w, http.StatusOK, metadata)
 }
 
-func (p *OAuthProxy) protectedResourceMetadataHandler(c *gin.Context) {
+func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	metadata := OAuthProtectedResourceMetadata{
-		Resource:              fmt.Sprintf("%s/mcp", p.getBaseURL(c)),
-		AuthorizationServers:  []string{p.getBaseURL(c)},
+		Resource:              fmt.Sprintf("%s/mcp", p.getBaseURL(r)),
+		AuthorizationServers:  []string{p.getBaseURL(r)},
 		Scopes:                p.metadata.ScopesSupported,
 		ResourceName:          p.resourceName,
 		ResourceDocumentation: p.metadata.ServiceDocumentation,
 	}
 
-	c.JSON(http.StatusOK, metadata)
+	JSON(w, http.StatusOK, metadata)
 }
 
-func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
+func (p *OAuthProxy) withTokenValidation(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			// Return 401 with proper WWW-Authenticate header
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(r))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="%s"`, resourceMetadataUrl)
-			c.Header("WWW-Authenticate", wwwAuthValue)
-			c.JSON(http.StatusUnauthorized, gin.H{
+			w.Header().Set("WWW-Authenticate", wwwAuthValue)
+			JSON(w, http.StatusUnauthorized, map[string]string{
 				"error":             "invalid_token",
 				"error_description": "Missing Authorization header",
 			})
-			c.Abort()
 			return
 		}
 
 		// Parse Authorization header
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(r))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid Authorization header format, expected 'Bearer TOKEN'", resource_metadata="%s"`, resourceMetadataUrl)
-			c.Header("WWW-Authenticate", wwwAuthValue)
-			c.JSON(http.StatusUnauthorized, gin.H{
+			w.Header().Set("WWW-Authenticate", wwwAuthValue)
+			JSON(w, http.StatusUnauthorized, map[string]string{
 				"error":             "invalid_token",
 				"error_description": "Invalid Authorization header format, expected 'Bearer TOKEN'",
 			})
-			c.Abort()
 			return
 		}
 
@@ -618,14 +677,13 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 
 		tokenInfo, err := p.tokenManager.GetTokenInfo(token)
 		if err != nil {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(r))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid or expired token", resource_metadata="%s"`, resourceMetadataUrl)
-			c.Header("WWW-Authenticate", wwwAuthValue)
-			c.JSON(http.StatusUnauthorized, gin.H{
+			w.Header().Set("WWW-Authenticate", wwwAuthValue)
+			JSON(w, http.StatusUnauthorized, map[string]string{
 				"error":             "invalid_token",
 				"error_description": "Invalid or expired token",
 			})
-			c.Abort()
 			return
 		}
 
@@ -633,28 +691,27 @@ func (p *OAuthProxy) validateTokenMiddleware() gin.HandlerFunc {
 		if tokenInfo.Props != nil {
 			decryptedProps, err := p.decryptPropsIfNeeded(tokenInfo.Props)
 			if err != nil {
-				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(c))
+				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", p.getBaseURL(r))
 				wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Failed to decrypt token data", resource_metadata="%s"`, resourceMetadataUrl)
-				c.Header("WWW-Authenticate", wwwAuthValue)
-				c.JSON(http.StatusUnauthorized, gin.H{
+				w.Header().Set("WWW-Authenticate", wwwAuthValue)
+				JSON(w, http.StatusUnauthorized, map[string]string{
 					"error":             "invalid_token",
 					"error_description": "Failed to decrypt token data",
 				})
-				c.Abort()
 				return
 			}
 			tokenInfo.Props = decryptedProps
 		}
 
-		// Store token info in context for MCP server
-		c.Set("token_info", tokenInfo)
-		c.Next()
+		next(w, r.WithContext(context.WithValue(r.Context(), tokenInfoKey{}, tokenInfo)))
 	}
 }
 
-func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
-	tokenInfo := c.MustGet("token_info").(*tokens.TokenInfo)
-	path := c.Param("path")
+type tokenInfoKey struct{}
+
+func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
+	tokenInfo := r.Context().Value(tokenInfoKey{}).(*tokens.TokenInfo)
+	path := r.PathValue("path")
 
 	// Check if the access token is expired and refresh if needed
 	if tokenInfo.Props != nil {
@@ -672,7 +729,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 					refreshToken, ok := tokenInfo.Props["refresh_token"].(string)
 					if !ok || refreshToken == "" {
 						log.Printf("No refresh token available, cannot refresh access token")
-						c.JSON(http.StatusUnauthorized, gin.H{
+						JSON(w, http.StatusUnauthorized, map[string]string{
 							"error":             "invalid_token",
 							"error_description": "Access token expired and no refresh token available",
 						})
@@ -684,7 +741,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 					provider, err := p.providers.GetProvider(p.provider)
 					if err != nil {
 						log.Printf("Failed to get provider for token refresh: %v", err)
-						c.JSON(http.StatusInternalServerError, gin.H{
+						JSON(w, http.StatusInternalServerError, map[string]string{
 							"error":             "server_error",
 							"error_description": "Failed to refresh token",
 						})
@@ -697,7 +754,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 					clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
 					if clientID == "" || clientSecret == "" {
 						log.Printf("OAuth credentials not configured for token refresh")
-						c.JSON(http.StatusInternalServerError, gin.H{
+						JSON(w, http.StatusInternalServerError, map[string]string{
 							"error":             "server_error",
 							"error_description": "OAuth credentials not configured",
 						})
@@ -706,10 +763,10 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 					}
 
 					// Refresh the token
-					newTokenInfo, err := provider.RefreshToken(c.Request.Context(), refreshToken, clientID, clientSecret)
+					newTokenInfo, err := provider.RefreshToken(r.Context(), refreshToken, clientID, clientSecret)
 					if err != nil {
 						log.Printf("Failed to refresh token: %v", err)
-						c.JSON(http.StatusUnauthorized, gin.H{
+						JSON(w, http.StatusUnauthorized, map[string]string{
 							"error":             "invalid_token",
 							"error_description": "Failed to refresh access token",
 						})
@@ -720,7 +777,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 					// Update the grant with new token information
 					if err := p.updateGrant(tokenInfo.GrantID, tokenInfo.UserID, tokenInfo, newTokenInfo); err != nil {
 						log.Printf("Failed to update grant: %v", err)
-						c.JSON(http.StatusInternalServerError, gin.H{
+						JSON(w, http.StatusInternalServerError, map[string]string{
 							"error":             "server_error",
 							"error_description": "Failed to update grant with new token",
 						})
@@ -749,7 +806,7 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 	}
 
 	// Log the proxy request for debugging
-	log.Printf("Proxying request: %s %s -> %s", c.Request.Method, c.Request.URL.Path, targetURL)
+	log.Printf("Proxying request: %s %s -> %s", r.Method, r.URL.Path, targetURL)
 
 	// Create reverse proxy
 	proxy := &httputil.ReverseProxy{
@@ -778,33 +835,33 @@ func (p *OAuthProxy) mcpProxyHandler(c *gin.Context) {
 				}
 			}
 		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {
 			log.Printf("Proxy error: %v", err)
-			c.AbortWithStatus(http.StatusBadGateway)
+			rw.WriteHeader(http.StatusBadGateway)
 		},
 	}
 
-	// Serve the request
-	proxy.ServeHTTP(c.Writer, c.Request)
+	// Serve the proxied request
+	proxy.ServeHTTP(w, r)
 }
 
-func (p *OAuthProxy) tokenHandler(c *gin.Context) {
+func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
-	if err := c.Request.ParseForm(); err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+	if err := r.ParseForm(); err != nil {
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid request body",
 		})
 		return
 	}
 
-	grantType := c.PostForm("grant_type")
-	clientID := c.PostForm("client_id")
-	clientSecret := c.PostForm("client_secret")
+	grantType := r.FormValue("grant_type")
+	clientID := r.FormValue("client_id")
+	clientSecret := r.FormValue("client_secret")
 
 	// Check for client ID
 	if clientID == "" {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client ID is required",
 		})
@@ -814,7 +871,7 @@ func (p *OAuthProxy) tokenHandler(c *gin.Context) {
 	// Get client info to determine authentication method
 	clientInfo, err := p.db.GetClient(clientID)
 	if err != nil || clientInfo == nil {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client not found",
 		})
@@ -828,7 +885,7 @@ func (p *OAuthProxy) tokenHandler(c *gin.Context) {
 	// For confidential clients, client_secret is required
 	if !isPublicClient {
 		if clientSecret == "" {
-			c.JSON(http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Client secret is required for confidential clients",
 			})
@@ -837,7 +894,7 @@ func (p *OAuthProxy) tokenHandler(c *gin.Context) {
 
 		// Validate client secret for confidential clients
 		if clientInfo.ClientSecret != clientSecret {
-			c.JSON(http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Invalid client secret",
 			})
@@ -847,26 +904,26 @@ func (p *OAuthProxy) tokenHandler(c *gin.Context) {
 
 	switch grantType {
 	case "authorization_code":
-		p.handleAuthorizationCodeGrant(c, clientID)
+		p.handleAuthorizationCodeGrant(w, r, clientID)
 	case "refresh_token":
-		p.handleRefreshTokenGrant(c, clientID)
+		p.handleRefreshTokenGrant(w, r, clientID)
 	default:
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "unsupported_grant_type",
 			ErrorDescription: "The grant type is not supported by this authorization server",
 		})
 	}
 }
 
-func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID string) {
-	code := c.PostForm("code")
-	codeVerifier := c.PostForm("code_verifier")
-	redirectURI := c.PostForm("redirect_uri")
+func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Request, clientID string) {
+	code := r.FormValue("code")
+	codeVerifier := r.FormValue("code_verifier")
+	redirectURI := r.FormValue("redirect_uri")
 
 	// Validate authorization code
 	grantID, userID, err := p.db.ValidateAuthCode(code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Invalid authorization code",
 		})
@@ -876,7 +933,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 	// Get the grant
 	grant, err := p.db.GetGrant(grantID, userID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Grant not found",
 		})
@@ -885,7 +942,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 
 	// Verify client ID matches
 	if grant.ClientID != clientID {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Client ID mismatch",
 		})
@@ -897,7 +954,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 		// Get client info to validate redirect URI
 		clientInfo, err := p.db.GetClient(clientID)
 		if err != nil || clientInfo == nil {
-			c.JSON(http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Client not found",
 			})
@@ -913,7 +970,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 			}
 		}
 		if !validRedirect {
-			c.JSON(http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, OAuthError{
 				Error:            "invalid_grant",
 				ErrorDescription: "Invalid redirect URI",
 			})
@@ -926,7 +983,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 
 	// OAuth 2.1 requires redirect_uri parameter unless PKCE is used
 	if redirectURI == "" && !isPkceEnabled {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "redirect_uri is required when not using PKCE",
 		})
@@ -936,7 +993,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 	// Check PKCE if code_verifier is provided
 	if codeVerifier != "" {
 		if !isPkceEnabled {
-			c.JSON(http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, OAuthError{
 				Error:            "invalid_request",
 				ErrorDescription: "code_verifier provided for a flow that did not use PKCE",
 			})
@@ -953,7 +1010,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 		}
 
 		if calculatedChallenge != grant.CodeChallenge {
-			c.JSON(http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, OAuthError{
 				Error:            "invalid_grant",
 				ErrorDescription: "Invalid PKCE code_verifier",
 			})
@@ -986,7 +1043,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 
 	if err := p.db.StoreToken(tokenData); err != nil {
 		log.Printf("Failed to store token: %v", err)
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store token",
 		})
@@ -1006,16 +1063,16 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(c *gin.Context, clientID strin
 		Scope:        strings.Join(grant.Scope, " "),
 	}
 
-	c.JSON(http.StatusOK, response)
+	JSON(w, http.StatusOK, response)
 }
 
-func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
-	refreshToken := c.PostForm("refresh_token")
+func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, clientID string) {
+	refreshToken := r.FormValue("refresh_token")
 
 	// Validate refresh token from database
 	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Invalid refresh token",
 		})
@@ -1024,7 +1081,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 
 	// Check if token is revoked
 	if tokenData.Revoked {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Token has been revoked",
 		})
@@ -1033,7 +1090,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 
 	// Check if refresh token is expired
 	if time.Now().After(tokenData.RefreshTokenExpiresAt) {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Refresh token has expired",
 		})
@@ -1042,7 +1099,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 
 	// Check if token belongs to the requesting client
 	if tokenData.ClientID != clientID {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Token does not belong to the requesting client",
 		})
@@ -1052,7 +1109,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 	// Get the grant to access props
 	_, err = p.db.GetGrant(tokenData.GrantID, tokenData.UserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Grant not found",
 		})
@@ -1084,7 +1141,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 
 	if err := p.db.StoreToken(newTokenData); err != nil {
 		log.Printf("Failed to store new token: %v", err)
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store new token",
 		})
@@ -1105,27 +1162,27 @@ func (p *OAuthProxy) handleRefreshTokenGrant(c *gin.Context, clientID string) {
 		Scope:        tokenData.Scope,
 	}
 
-	c.JSON(http.StatusOK, response)
+	JSON(w, http.StatusOK, response)
 }
 
-func (p *OAuthProxy) revokeHandler(c *gin.Context) {
+func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
-	if err := c.Request.ParseForm(); err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+	if err := r.ParseForm(); err != nil {
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid request body",
 		})
 		return
 	}
 
-	token := c.PostForm("token")
-	tokenTypeHint := c.PostForm("token_type_hint") // RFC 7009: token_type_hint parameter
-	clientID := c.PostForm("client_id")
-	clientSecret := c.PostForm("client_secret")
+	token := r.FormValue("token")
+	tokenTypeHint := r.FormValue("token_type_hint") // RFC 7009: token_type_hint parameter
+	clientID := r.FormValue("client_id")
+	clientSecret := r.FormValue("client_secret")
 
 	// Validate client ID
 	if clientID == "" {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client ID is required",
 		})
@@ -1135,7 +1192,7 @@ func (p *OAuthProxy) revokeHandler(c *gin.Context) {
 	// Get client info to determine authentication method
 	clientInfo, err := p.db.GetClient(clientID)
 	if err != nil || clientInfo == nil {
-		c.JSON(http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client not found",
 		})
@@ -1149,7 +1206,7 @@ func (p *OAuthProxy) revokeHandler(c *gin.Context) {
 	// For confidential clients, client_secret is required
 	if !isPublicClient {
 		if clientSecret == "" {
-			c.JSON(http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Client secret is required for confidential clients",
 			})
@@ -1158,7 +1215,7 @@ func (p *OAuthProxy) revokeHandler(c *gin.Context) {
 
 		// Validate client secret for confidential clients
 		if clientInfo.ClientSecret != clientSecret {
-			c.JSON(http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Invalid client secret",
 			})
@@ -1168,7 +1225,7 @@ func (p *OAuthProxy) revokeHandler(c *gin.Context) {
 
 	// Validate token parameter
 	if token == "" {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Token parameter is required",
 		})
@@ -1211,15 +1268,15 @@ func (p *OAuthProxy) revokeHandler(c *gin.Context) {
 	}
 
 	// Always return 200 OK as per RFC 7009
-	c.Status(http.StatusOK)
+	w.WriteHeader(http.StatusOK)
 }
 
-func (p *OAuthProxy) registerHandler(c *gin.Context) {
+func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// Client registration is always enabled when this endpoint is accessible
 
 	// Only allow POST method
-	if c.Request.Method != "POST" {
-		c.JSON(http.StatusMethodNotAllowed, OAuthError{
+	if r.Method != "POST" {
+		JSON(w, http.StatusMethodNotAllowed, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Method not allowed",
 		})
@@ -1227,8 +1284,8 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 	}
 
 	// Check content length (max 1MB)
-	if c.Request.ContentLength > 1024*1024 {
-		c.JSON(http.StatusRequestEntityTooLarge, OAuthError{
+	if r.ContentLength > 1024*1024 {
+		JSON(w, http.StatusRequestEntityTooLarge, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Request payload too large, must be under 1 MiB",
 		})
@@ -1237,8 +1294,8 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 
 	// Parse JSON body
 	var clientMetadata map[string]interface{}
-	if err := c.ShouldBindJSON(&clientMetadata); err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+	if err := json.NewDecoder(r.Body).Decode(&clientMetadata); err != nil {
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid JSON payload",
 		})
@@ -1248,7 +1305,7 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 	// Validate and extract client metadata
 	clientInfo, err := p.validateClientMetadata(clientMetadata)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, OAuthError{
 			Error:            "invalid_client_metadata",
 			ErrorDescription: err.Error(),
 		})
@@ -1289,7 +1346,7 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 	// Store client in database
 	if err := p.db.StoreClient(dbClientInfo); err != nil {
 		log.Printf("Failed to store client: %v", err)
-		c.JSON(http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to register client",
 		})
@@ -1297,7 +1354,7 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 	}
 
 	// Build response
-	baseURL := p.getBaseURL(c)
+	baseURL := p.getBaseURL(r)
 	response := map[string]interface{}{
 		"client_id":                  clientInfo.ClientID,
 		"redirect_uris":              clientInfo.RedirectUris,
@@ -1320,7 +1377,7 @@ func (p *OAuthProxy) registerHandler(c *gin.Context) {
 		response["client_secret"] = clientSecret
 	}
 
-	c.JSON(http.StatusCreated, response)
+	JSON(w, http.StatusCreated, response)
 }
 
 func (p *OAuthProxy) validateClientMetadata(metadata map[string]interface{}) (*ClientInfo, error) {
