@@ -24,14 +24,14 @@ func NewMockDatabase() *MockDatabase {
 	}
 }
 
-func (m *MockDatabase) GetToken(accessToken string) (interface{}, error) {
+func (m *MockDatabase) GetToken(accessToken string) (*types.TokenData, error) {
 	if token, exists := m.tokens[accessToken]; exists {
 		return token, nil
 	}
 	return nil, assert.AnError
 }
 
-func (m *MockDatabase) GetGrant(grantID, userID string) (interface{}, error) {
+func (m *MockDatabase) GetGrant(grantID, userID string) (*types.Grant, error) {
 	key := grantID + ":" + userID
 	if grant, exists := m.grants[key]; exists {
 		return grant, nil
@@ -42,7 +42,7 @@ func (m *MockDatabase) GetGrant(grantID, userID string) (interface{}, error) {
 // TestTokenManager tests the token manager functionality
 func TestTokenManager(t *testing.T) {
 	t.Run("TestNewTokenManager", func(t *testing.T) {
-		tokenManager, err := NewTokenManager()
+		tokenManager, err := NewTokenManager(nil)
 		require.NoError(t, err)
 		assert.NotNil(t, tokenManager)
 		assert.NotNil(t, tokenManager.secretKey)
@@ -50,20 +50,17 @@ func TestTokenManager(t *testing.T) {
 	})
 
 	t.Run("TestSetDatabase", func(t *testing.T) {
-		tokenManager, err := NewTokenManager()
+		mockDB := NewMockDatabase()
+		tokenManager, err := NewTokenManager(mockDB)
 		require.NoError(t, err)
 
-		mockDB := NewMockDatabase()
-		tokenManager.SetDatabase(mockDB)
 		assert.Equal(t, mockDB, tokenManager.db)
 	})
 
 	t.Run("TestValidateAccessToken", func(t *testing.T) {
-		tokenManager, err := NewTokenManager()
-		require.NoError(t, err)
-
 		mockDB := NewMockDatabase()
-		tokenManager.SetDatabase(mockDB)
+		tokenManager, err := NewTokenManager(mockDB)
+		require.NoError(t, err)
 
 		// Test without database
 		tokenManager.db = nil
@@ -72,7 +69,7 @@ func TestTokenManager(t *testing.T) {
 		assert.Contains(t, err.Error(), "database not configured")
 
 		// Test with database but no token
-		tokenManager.SetDatabase(mockDB)
+		tokenManager.db = mockDB
 		_, err = tokenManager.ValidateAccessToken("non_existent_token")
 		assert.Error(t, err)
 		// The error could be either "token not found" or "invalid token format" depending on the token format
@@ -168,11 +165,9 @@ func TestTokenManager(t *testing.T) {
 	})
 
 	t.Run("TestGetTokenInfo", func(t *testing.T) {
-		tokenManager, err := NewTokenManager()
-		require.NoError(t, err)
-
 		mockDB := NewMockDatabase()
-		tokenManager.SetDatabase(mockDB)
+		tokenManager, err := NewTokenManager(mockDB)
+		require.NoError(t, err)
 
 		// Test with invalid token
 		_, err = tokenManager.GetTokenInfo("invalid_token")
@@ -251,11 +246,9 @@ func TestTokenInfo(t *testing.T) {
 
 // TestTokenValidationEdgeCases tests edge cases in token validation
 func TestTokenValidationEdgeCases(t *testing.T) {
-	tokenManager, err := NewTokenManager()
-	require.NoError(t, err)
-
 	mockDB := NewMockDatabase()
-	tokenManager.SetDatabase(mockDB)
+	tokenManager, err := NewTokenManager(mockDB)
+	require.NoError(t, err)
 
 	t.Run("TestEmptyToken", func(t *testing.T) {
 		_, err := tokenManager.ValidateAccessToken("")
@@ -336,11 +329,9 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 
 // TestConcurrentTokenValidation tests concurrent access to token validation
 func TestConcurrentTokenValidation(t *testing.T) {
-	tokenManager, err := NewTokenManager()
-	require.NoError(t, err)
-
 	mockDB := NewMockDatabase()
-	tokenManager.SetDatabase(mockDB)
+	tokenManager, err := NewTokenManager(mockDB)
+	require.NoError(t, err)
 
 	// Create multiple valid tokens
 	for i := 0; i < 10; i++ {

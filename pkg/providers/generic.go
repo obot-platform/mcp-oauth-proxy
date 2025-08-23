@@ -9,25 +9,16 @@ import (
 	"os"
 	"strings"
 	"time"
-)
 
-// OAuthMetadata represents OAuth authorization server metadata
-type OAuthMetadata struct {
-	Issuer                 string   `json:"issuer"`
-	AuthorizationEndpoint  string   `json:"authorization_endpoint"`
-	TokenEndpoint          string   `json:"token_endpoint"`
-	UserinfoEndpoint       string   `json:"userinfo_endpoint,omitempty"`
-	ScopesSupported        []string `json:"scopes_supported,omitempty"`
-	ResponseTypesSupported []string `json:"response_types_supported,omitempty"`
-	GrantTypesSupported    []string `json:"grant_types_supported,omitempty"`
-}
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
+)
 
 // GenericProvider implements a generic OAuth provider
 type GenericProvider struct {
 	clientID     string
 	clientSecret string
 	authorizeURL string
-	metadata     *OAuthMetadata
+	metadata     *types.OAuthMetadata
 	httpClient   *http.Client
 }
 
@@ -87,7 +78,7 @@ func (p *GenericProvider) discoverEndpoints() error {
 	}
 
 	// If no metadata found, create a basic metadata structure
-	p.metadata = &OAuthMetadata{
+	p.metadata = &types.OAuthMetadata{
 		Issuer:                 baseURL,
 		AuthorizationEndpoint:  p.authorizeURL,
 		TokenEndpoint:          baseURL + "/token",
@@ -101,7 +92,7 @@ func (p *GenericProvider) discoverEndpoints() error {
 }
 
 // fetchMetadata fetches OAuth metadata from a URL
-func (p *GenericProvider) fetchMetadata(metadataURL string) (*OAuthMetadata, error) {
+func (p *GenericProvider) fetchMetadata(metadataURL string) (*types.OAuthMetadata, error) {
 	resp, err := p.httpClient.Get(metadataURL)
 	if err != nil {
 		return nil, err
@@ -117,7 +108,7 @@ func (p *GenericProvider) fetchMetadata(metadataURL string) (*OAuthMetadata, err
 		return nil, fmt.Errorf("failed to fetch metadata: %s", resp.Status)
 	}
 
-	var metadata OAuthMetadata
+	var metadata types.OAuthMetadata
 	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
 		return nil, fmt.Errorf("failed to decode metadata: %w", err)
 	}

@@ -17,8 +17,8 @@ type TokenManager struct {
 
 // Database interface for token operations
 type Database interface {
-	GetToken(accessToken string) (interface{}, error)
-	GetGrant(grantID, userID string) (interface{}, error)
+	GetToken(accessToken string) (*types.TokenData, error)
+	GetGrant(grantID, userID string) (*types.Grant, error)
 }
 
 type TokenClaims struct {
@@ -29,7 +29,7 @@ type TokenClaims struct {
 }
 
 // NewTokenManager creates a new token manager
-func NewTokenManager() (*TokenManager, error) {
+func NewTokenManager(db Database) (*TokenManager, error) {
 	// Generate a random secret key if not provided
 	secretKey := make([]byte, 32)
 	if _, err := rand.Read(secretKey); err != nil {
@@ -38,12 +38,8 @@ func NewTokenManager() (*TokenManager, error) {
 
 	return &TokenManager{
 		secretKey: secretKey,
+		db:        db,
 	}, nil
-}
-
-// SetDatabase sets the database dependency for token operations
-func (tm *TokenManager) SetDatabase(db Database) {
-	tm.db = db
 }
 
 // ValidateAccessToken validates and parses a simple string access token
@@ -62,14 +58,9 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 	grantID := parts[1]
 
 	// Get token data from database
-	tokenDataInterface, err := tm.db.GetToken(tokenString)
+	tokenData, err := tm.db.GetToken(tokenString)
 	if err != nil {
 		return nil, fmt.Errorf("token not found: %w", err)
-	}
-
-	tokenData, ok := tokenDataInterface.(*types.TokenData)
-	if !ok {
-		return nil, fmt.Errorf("invalid token data type")
 	}
 
 	// Check if token is revoked
@@ -83,14 +74,9 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 	}
 
 	// Get the grant to access props
-	grantInterface, err := tm.db.GetGrant(grantID, userID)
+	grant, err := tm.db.GetGrant(grantID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("grant not found: %w", err)
-	}
-
-	grant, ok := grantInterface.(*types.Grant)
-	if !ok {
-		return nil, fmt.Errorf("invalid grant data type")
 	}
 
 	// Create TokenClaims with the grant's props
