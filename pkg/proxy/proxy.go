@@ -29,7 +29,7 @@ import (
 )
 
 type OAuthProxy struct {
-	metadata      *OAuthMetadata
+	metadata      *types.OAuthMetadata
 	db            *db.Store
 	rateLimiter   *ratelimit.RateLimiter
 	providers     *providers.Manager
@@ -120,18 +120,15 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	}
 
 	// Initialize token manager
-	tokenManager, err := tokens.NewTokenManager()
+	tokenManager, err := tokens.NewTokenManager(db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token manager: %w", err)
 	}
 
-	// Set database dependency for token validation
-	tokenManager.SetDatabase(&databaseAdapter{db: db})
-
 	// Split and trim scopes to handle whitespace
 	scopesSupported := ParseScopesSupported(os.Getenv("SCOPES_SUPPORTED"))
 
-	metadata := &OAuthMetadata{
+	metadata := &types.OAuthMetadata{
 		ResponseTypesSupported:                   []string{"code"},
 		CodeChallengeMethodsSupported:            []string{"S256"},
 		TokenEndpointAuthMethodsSupported:        []string{"client_secret_post"},
@@ -248,7 +245,7 @@ func (p *OAuthProxy) withRateLimit(next http.HandlerFunc) http.HandlerFunc {
 		if p.rateLimiter != nil {
 			clientIP := getClientIP(r)
 			if !p.rateLimiter.Allow(clientIP) {
-				JSON(w, http.StatusTooManyRequests, OAuthError{
+				JSON(w, http.StatusTooManyRequests, types.OAuthError{
 					Error:            "too_many_requests",
 					ErrorDescription: "Rate limit exceeded",
 				})
@@ -270,7 +267,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 		params = r.URL.Query()
 	} else {
 		if err := r.ParseForm(); err != nil {
-			JSON(w, http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, types.OAuthError{
 				Error:            "invalid_request",
 				ErrorDescription: "Failed to parse form data",
 			})
@@ -280,7 +277,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse authorization request
-	authReq := AuthRequest{
+	authReq := types.AuthRequest{
 		ResponseType:        params.Get("response_type"),
 		ClientID:            params.Get("client_id"),
 		RedirectURI:         params.Get("redirect_uri"),
@@ -296,7 +293,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate required parameters
 	if authReq.ResponseType == "" || authReq.ClientID == "" || authReq.RedirectURI == "" {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Missing required parameters",
 		})
@@ -305,7 +302,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate response type
 	if authReq.ResponseType != "code" && authReq.ResponseType != "token" {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "unsupported_response_type",
 			ErrorDescription: "Only 'code' and 'token' response types are supported",
 		})
@@ -315,7 +312,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate client exists
 	clientInfo, err := p.db.GetClient(authReq.ClientID)
 	if err != nil || clientInfo == nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client not found",
 		})
@@ -331,7 +328,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !validRedirect {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid redirect URI",
 		})
@@ -343,7 +340,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the provider
 	provider, err := p.providers.GetProvider(providerName)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: fmt.Sprintf("Provider '%s' not available", providerName),
 		})
@@ -356,7 +353,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if provider is configured
 	if clientID == "" || clientSecret == "" {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "OAuth provider not configured",
 		})
@@ -365,7 +362,7 @@ func (p *OAuthProxy) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	stateData, err := json.Marshal(authReq)
 	if err != nil {
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to marshal state data",
 		})
@@ -396,7 +393,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check for OAuth errors
 	if error != "" {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            error,
 			ErrorDescription: errorDescription,
 		})
@@ -405,24 +402,24 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate required parameters
 	if code == "" {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Missing authorization code",
 		})
 		return
 	}
 
-	var authReq AuthRequest
+	var authReq types.AuthRequest
 	stateData, err := base64.URLEncoding.DecodeString(state)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid state parameter",
 		})
 		return
 	}
 	if err := json.Unmarshal(stateData, &authReq); err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid state parameter",
 		})
@@ -432,7 +429,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the provider
 	provider, err := p.providers.GetProvider(p.provider)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Provider not available",
 		})
@@ -448,7 +445,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	tokenInfo, err := provider.ExchangeCodeForToken(r.Context(), code, clientID, clientSecret, redirectURI)
 	if err != nil {
 		log.Printf("Failed to exchange code for token: %v", err)
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Failed to exchange authorization code",
 		})
@@ -459,7 +456,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	userInfo, err := provider.GetUserInfo(r.Context(), tokenInfo.AccessToken)
 	if err != nil {
 		log.Printf("Failed to get user info: %v", err)
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Failed to get user information",
 		})
@@ -469,7 +466,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Create a grant for this user
 	grantID, err := generateRandomString(16)
 	if err != nil {
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to generate grant ID",
 		})
@@ -495,7 +492,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		encryptionKey, err := base64.StdEncoding.DecodeString(p.encryptionKey)
 		if err != nil {
 			log.Printf("Failed to decode encryption key: %v", err)
-			JSON(w, http.StatusInternalServerError, OAuthError{
+			JSON(w, http.StatusInternalServerError, types.OAuthError{
 				Error:            "server_error",
 				ErrorDescription: "Invalid encryption key configuration",
 			})
@@ -505,7 +502,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		// Validate key length (must be 32 bytes for AES-256)
 		if len(encryptionKey) != 32 {
 			log.Printf("Invalid encryption key length: %d bytes (expected 32)", len(encryptionKey))
-			JSON(w, http.StatusInternalServerError, OAuthError{
+			JSON(w, http.StatusInternalServerError, types.OAuthError{
 				Error:            "server_error",
 				ErrorDescription: "Invalid encryption key length",
 			})
@@ -516,7 +513,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		encryptedProps, err := encryptData(sensitiveProps, encryptionKey)
 		if err != nil {
 			log.Printf("Failed to encrypt props data: %v", err)
-			JSON(w, http.StatusInternalServerError, OAuthError{
+			JSON(w, http.StatusInternalServerError, types.OAuthError{
 				Error:            "server_error",
 				ErrorDescription: "Failed to encrypt sensitive data",
 			})
@@ -558,7 +555,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Store the grant
 	if err := p.db.StoreGrant(grant); err != nil {
 		log.Printf("Failed to store grant: %v", err)
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store grant",
 		})
@@ -568,7 +565,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Generate authorization code
 	randomPart, err := generateRandomString(32)
 	if err != nil {
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to generate authorization code",
 		})
@@ -579,7 +576,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Store the authorization code
 	if err := p.db.StoreAuthCode(authCode, grantID, userInfo.ID); err != nil {
 		log.Printf("Failed to store authorization code: %v", err)
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store authorization code",
 		})
@@ -591,7 +588,7 @@ func (p *OAuthProxy) callbackHandler(w http.ResponseWriter, r *http.Request) {
 
 	parsedURL, err := url.Parse(redirectURL)
 	if err != nil {
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Invalid redirect URL",
 		})
@@ -614,7 +611,7 @@ func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request
 	baseURL := p.getBaseURL(r)
 
 	// Create dynamic metadata based on the request
-	metadata := &OAuthMetadata{
+	metadata := &types.OAuthMetadata{
 		Issuer:                                   baseURL,
 		ServiceDocumentation:                     p.metadata.ServiceDocumentation,
 		AuthorizationEndpoint:                    fmt.Sprintf("%s/authorize", baseURL),
@@ -634,7 +631,7 @@ func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *http.Request) {
-	metadata := OAuthProtectedResourceMetadata{
+	metadata := types.OAuthProtectedResourceMetadata{
 		Resource:              fmt.Sprintf("%s/mcp", p.getBaseURL(r)),
 		AuthorizationServers:  []string{p.getBaseURL(r)},
 		Scopes:                p.metadata.ScopesSupported,
@@ -848,7 +845,7 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid request body",
 		})
@@ -861,7 +858,7 @@ func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check for client ID
 	if clientID == "" {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client ID is required",
 		})
@@ -871,7 +868,7 @@ func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	// Get client info to determine authentication method
 	clientInfo, err := p.db.GetClient(clientID)
 	if err != nil || clientInfo == nil {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client not found",
 		})
@@ -885,7 +882,7 @@ func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	// For confidential clients, client_secret is required
 	if !isPublicClient {
 		if clientSecret == "" {
-			JSON(w, http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, types.OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Client secret is required for confidential clients",
 			})
@@ -894,7 +891,7 @@ func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Validate client secret for confidential clients
 		if clientInfo.ClientSecret != clientSecret {
-			JSON(w, http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, types.OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Invalid client secret",
 			})
@@ -908,7 +905,7 @@ func (p *OAuthProxy) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	case "refresh_token":
 		p.handleRefreshTokenGrant(w, r, clientID)
 	default:
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "unsupported_grant_type",
 			ErrorDescription: "The grant type is not supported by this authorization server",
 		})
@@ -923,7 +920,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 	// Validate authorization code
 	grantID, userID, err := p.db.ValidateAuthCode(code)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Invalid authorization code",
 		})
@@ -933,7 +930,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 	// Get the grant
 	grant, err := p.db.GetGrant(grantID, userID)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Grant not found",
 		})
@@ -942,7 +939,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 
 	// Verify client ID matches
 	if grant.ClientID != clientID {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Client ID mismatch",
 		})
@@ -954,7 +951,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 		// Get client info to validate redirect URI
 		clientInfo, err := p.db.GetClient(clientID)
 		if err != nil || clientInfo == nil {
-			JSON(w, http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, types.OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Client not found",
 			})
@@ -970,7 +967,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 			}
 		}
 		if !validRedirect {
-			JSON(w, http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, types.OAuthError{
 				Error:            "invalid_grant",
 				ErrorDescription: "Invalid redirect URI",
 			})
@@ -983,7 +980,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 
 	// OAuth 2.1 requires redirect_uri parameter unless PKCE is used
 	if redirectURI == "" && !isPkceEnabled {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "redirect_uri is required when not using PKCE",
 		})
@@ -993,7 +990,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 	// Check PKCE if code_verifier is provided
 	if codeVerifier != "" {
 		if !isPkceEnabled {
-			JSON(w, http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, types.OAuthError{
 				Error:            "invalid_request",
 				ErrorDescription: "code_verifier provided for a flow that did not use PKCE",
 			})
@@ -1010,7 +1007,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 		}
 
 		if calculatedChallenge != grant.CodeChallenge {
-			JSON(w, http.StatusBadRequest, OAuthError{
+			JSON(w, http.StatusBadRequest, types.OAuthError{
 				Error:            "invalid_grant",
 				ErrorDescription: "Invalid PKCE code_verifier",
 			})
@@ -1043,7 +1040,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 
 	if err := p.db.StoreToken(tokenData); err != nil {
 		log.Printf("Failed to store token: %v", err)
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store token",
 		})
@@ -1055,7 +1052,7 @@ func (p *OAuthProxy) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http
 		log.Printf("Error deleting authorization code: %v", err)
 	}
 
-	response := TokenResponse{
+	response := types.TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
@@ -1072,7 +1069,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 	// Validate refresh token from database
 	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
 	if err != nil {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Invalid refresh token",
 		})
@@ -1081,7 +1078,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 
 	// Check if token is revoked
 	if tokenData.Revoked {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Token has been revoked",
 		})
@@ -1090,7 +1087,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 
 	// Check if refresh token is expired
 	if time.Now().After(tokenData.RefreshTokenExpiresAt) {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Refresh token has expired",
 		})
@@ -1099,7 +1096,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 
 	// Check if token belongs to the requesting client
 	if tokenData.ClientID != clientID {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Token does not belong to the requesting client",
 		})
@@ -1109,7 +1106,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 	// Get the grant to access props
 	_, err = p.db.GetGrant(tokenData.GrantID, tokenData.UserID)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_grant",
 			ErrorDescription: "Grant not found",
 		})
@@ -1141,7 +1138,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 
 	if err := p.db.StoreToken(newTokenData); err != nil {
 		log.Printf("Failed to store new token: %v", err)
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to store new token",
 		})
@@ -1154,7 +1151,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 		// Don't fail the request, but log the error
 	}
 
-	response := TokenResponse{
+	response := types.TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
@@ -1168,7 +1165,7 @@ func (p *OAuthProxy) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Requ
 func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid request body",
 		})
@@ -1182,7 +1179,7 @@ func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate client ID
 	if clientID == "" {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client ID is required",
 		})
@@ -1192,7 +1189,7 @@ func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	// Get client info to determine authentication method
 	clientInfo, err := p.db.GetClient(clientID)
 	if err != nil || clientInfo == nil {
-		JSON(w, http.StatusUnauthorized, OAuthError{
+		JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_client",
 			ErrorDescription: "Client not found",
 		})
@@ -1206,7 +1203,7 @@ func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	// For confidential clients, client_secret is required
 	if !isPublicClient {
 		if clientSecret == "" {
-			JSON(w, http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, types.OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Client secret is required for confidential clients",
 			})
@@ -1215,7 +1212,7 @@ func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Validate client secret for confidential clients
 		if clientInfo.ClientSecret != clientSecret {
-			JSON(w, http.StatusUnauthorized, OAuthError{
+			JSON(w, http.StatusUnauthorized, types.OAuthError{
 				Error:            "invalid_client",
 				ErrorDescription: "Invalid client secret",
 			})
@@ -1225,7 +1222,7 @@ func (p *OAuthProxy) revokeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate token parameter
 	if token == "" {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Token parameter is required",
 		})
@@ -1276,7 +1273,7 @@ func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Only allow POST method
 	if r.Method != "POST" {
-		JSON(w, http.StatusMethodNotAllowed, OAuthError{
+		JSON(w, http.StatusMethodNotAllowed, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Method not allowed",
 		})
@@ -1285,7 +1282,7 @@ func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check content length (max 1MB)
 	if r.ContentLength > 1024*1024 {
-		JSON(w, http.StatusRequestEntityTooLarge, OAuthError{
+		JSON(w, http.StatusRequestEntityTooLarge, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Request payload too large, must be under 1 MiB",
 		})
@@ -1295,7 +1292,7 @@ func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	var clientMetadata map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&clientMetadata); err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid JSON payload",
 		})
@@ -1305,7 +1302,7 @@ func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate and extract client metadata
 	clientInfo, err := p.validateClientMetadata(clientMetadata)
 	if err != nil {
-		JSON(w, http.StatusBadRequest, OAuthError{
+		JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_client_metadata",
 			ErrorDescription: err.Error(),
 		})
@@ -1346,7 +1343,7 @@ func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// Store client in database
 	if err := p.db.StoreClient(dbClientInfo); err != nil {
 		log.Printf("Failed to store client: %v", err)
-		JSON(w, http.StatusInternalServerError, OAuthError{
+		JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
 			ErrorDescription: "Failed to register client",
 		})
@@ -1380,7 +1377,7 @@ func (p *OAuthProxy) registerHandler(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusCreated, response)
 }
 
-func (p *OAuthProxy) validateClientMetadata(metadata map[string]interface{}) (*ClientInfo, error) {
+func (p *OAuthProxy) validateClientMetadata(metadata map[string]interface{}) (*types.ClientInfo, error) {
 	// Helper function to validate string fields
 	validateStringField := func(field interface{}, name string) (string, error) {
 		if field == nil {
@@ -1485,7 +1482,7 @@ func (p *OAuthProxy) validateClientMetadata(metadata map[string]interface{}) (*C
 		responseTypes = []string{"code"}
 	}
 
-	return &ClientInfo{
+	return &types.ClientInfo{
 		RedirectUris:            redirectUris,
 		ClientName:              clientName,
 		LogoURI:                 logoURI,
@@ -1716,19 +1713,6 @@ func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.To
 	}
 
 	return nil
-}
-
-// databaseAdapter adapts the database to the tokens.Database interface
-type databaseAdapter struct {
-	db *db.Store
-}
-
-func (da *databaseAdapter) GetToken(accessToken string) (interface{}, error) {
-	return da.db.GetToken(accessToken)
-}
-
-func (da *databaseAdapter) GetGrant(grantID, userID string) (interface{}, error) {
-	return da.db.GetGrant(grantID, userID)
 }
 
 // OAuthProxy represents the OAuth proxy server
