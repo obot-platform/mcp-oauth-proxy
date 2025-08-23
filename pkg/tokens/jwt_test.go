@@ -6,22 +6,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"mcp-oauth-proxy/database"
 )
 
 // MockDatabase implements the Database interface for testing
 type MockDatabase struct {
-	tokens map[string]*database.TokenData
-	grants map[string]*database.Grant
+	tokens map[string]*types.TokenData
+	grants map[string]*types.Grant
 }
 
 func NewMockDatabase() *MockDatabase {
 	return &MockDatabase{
-		tokens: make(map[string]*database.TokenData),
-		grants: make(map[string]*database.Grant),
+		tokens: make(map[string]*types.TokenData),
+		grants: make(map[string]*types.Grant),
 	}
 }
 
@@ -87,7 +86,7 @@ func TestTokenManager(t *testing.T) {
 		// Test with valid token but revoked
 		validToken := "user123:grant456:access_token_123"
 		expiredTime := time.Now().Add(-1 * time.Hour)
-		mockDB.tokens[validToken] = &database.TokenData{
+		mockDB.tokens[validToken] = &types.TokenData{
 			AccessToken: validToken,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -105,7 +104,7 @@ func TestTokenManager(t *testing.T) {
 
 		// Test with expired token
 		expiredToken := "user123:grant456:expired_token"
-		mockDB.tokens[expiredToken] = &database.TokenData{
+		mockDB.tokens[expiredToken] = &types.TokenData{
 			AccessToken: expiredToken,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -122,7 +121,7 @@ func TestTokenManager(t *testing.T) {
 
 		// Test with valid token but missing grant
 		validTokenNoGrant := "user123:missing_grant:valid_token"
-		mockDB.tokens[validTokenNoGrant] = &database.TokenData{
+		mockDB.tokens[validTokenNoGrant] = &types.TokenData{
 			AccessToken: validTokenNoGrant,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -139,7 +138,7 @@ func TestTokenManager(t *testing.T) {
 
 		// Test with valid token and grant
 		validTokenWithGrant := "user123:valid_grant:valid_token"
-		mockDB.tokens[validTokenWithGrant] = &database.TokenData{
+		mockDB.tokens[validTokenWithGrant] = &types.TokenData{
 			AccessToken: validTokenWithGrant,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -150,7 +149,7 @@ func TestTokenManager(t *testing.T) {
 			Revoked:     false,
 		}
 
-		mockDB.grants["valid_grant:user123"] = &database.Grant{
+		mockDB.grants["valid_grant:user123"] = &types.Grant{
 			ID:        "valid_grant",
 			ClientID:  "test_client",
 			UserID:    "user123",
@@ -181,7 +180,7 @@ func TestTokenManager(t *testing.T) {
 
 		// Test with valid token
 		validToken := "user123:valid_grant:valid_token"
-		mockDB.tokens[validToken] = &database.TokenData{
+		mockDB.tokens[validToken] = &types.TokenData{
 			AccessToken: validToken,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -192,7 +191,7 @@ func TestTokenManager(t *testing.T) {
 			Revoked:     false,
 		}
 
-		mockDB.grants["valid_grant:user123"] = &database.Grant{
+		mockDB.grants["valid_grant:user123"] = &types.Grant{
 			ID:        "valid_grant",
 			ClientID:  "test_client",
 			UserID:    "user123",
@@ -279,7 +278,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 	t.Run("TestTokenWithInvalidDatabaseResponse", func(t *testing.T) {
 		// Test with database returning wrong type
 		validToken := "user123:grant456:valid_token"
-		mockDB.tokens[validToken] = &database.TokenData{
+		mockDB.tokens[validToken] = &types.TokenData{
 			AccessToken: validToken,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -291,7 +290,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 		}
 
 		// Add the corresponding grant
-		mockDB.grants["grant456:user123"] = &database.Grant{
+		mockDB.grants["grant456:user123"] = &types.Grant{
 			ID:        "grant456",
 			ClientID:  "test_client",
 			UserID:    "user123",
@@ -308,7 +307,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 
 	t.Run("TestGrantWithInvalidDatabaseResponse", func(t *testing.T) {
 		validToken := "user123:grant456:valid_token"
-		mockDB.tokens[validToken] = &database.TokenData{
+		mockDB.tokens[validToken] = &types.TokenData{
 			AccessToken: validToken,
 			ClientID:    "test_client",
 			UserID:      "user123",
@@ -319,7 +318,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			Revoked:     false,
 		}
 
-		mockDB.grants["grant456:user123"] = &database.Grant{
+		mockDB.grants["grant456:user123"] = &types.Grant{
 			ID:        "grant456",
 			ClientID:  "test_client",
 			UserID:    "user123",
@@ -346,7 +345,7 @@ func TestConcurrentTokenValidation(t *testing.T) {
 	// Create multiple valid tokens
 	for i := 0; i < 10; i++ {
 		token := fmt.Sprintf("user%d:grant%d:token%d", i, i, i)
-		mockDB.tokens[token] = &database.TokenData{
+		mockDB.tokens[token] = &types.TokenData{
 			AccessToken: token,
 			ClientID:    "test_client",
 			UserID:      fmt.Sprintf("user%d", i),
@@ -357,7 +356,7 @@ func TestConcurrentTokenValidation(t *testing.T) {
 			Revoked:     false,
 		}
 
-		mockDB.grants[fmt.Sprintf("grant%d:user%d", i, i)] = &database.Grant{
+		mockDB.grants[fmt.Sprintf("grant%d:user%d", i, i)] = &types.Grant{
 			ID:        fmt.Sprintf("grant%d", i),
 			ClientID:  "test_client",
 			UserID:    fmt.Sprintf("user%d", i),

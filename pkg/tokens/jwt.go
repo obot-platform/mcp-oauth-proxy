@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"mcp-oauth-proxy/database"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
 
 // TokenManager handles token generation and validation
@@ -67,7 +67,7 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 		return nil, fmt.Errorf("token not found: %w", err)
 	}
 
-	tokenData, ok := tokenDataInterface.(*database.TokenData)
+	tokenData, ok := tokenDataInterface.(*types.TokenData)
 	if !ok {
 		return nil, fmt.Errorf("invalid token data type")
 	}
@@ -88,7 +88,7 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 		return nil, fmt.Errorf("grant not found: %w", err)
 	}
 
-	grant, ok := grantInterface.(*database.Grant)
+	grant, ok := grantInterface.(*types.Grant)
 	if !ok {
 		return nil, fmt.Errorf("invalid grant data type")
 	}

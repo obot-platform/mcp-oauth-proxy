@@ -1,4 +1,4 @@
-package database
+package db
 
 import (
 	"crypto/rand"
@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +24,7 @@ func TestDatabaseOperations(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Skipping database tests: TEST_DATABASE_DSN is not set")
 	}
-	db, err := NewDatabase(dsn)
+	db, err := New(dsn)
 	if err != nil {
 		t.Skipf("Skipping database tests: %v", err)
 	}
@@ -57,12 +58,9 @@ func TestDatabaseOperations(t *testing.T) {
 		testRefreshTokenExpiration(t, db)
 	})
 
-	t.Run("TestDatabaseMigration", func(t *testing.T) {
-		testDatabaseMigration(t, db)
-	})
 }
 
-func testClientOperations(t *testing.T, db *Database) {
+func testClientOperations(t *testing.T, db *Store) {
 
 	clientID, err := generateRandomString(16)
 	require.NoError(t, err)
@@ -71,7 +69,7 @@ func testClientOperations(t *testing.T, db *Database) {
 	require.NoError(t, err)
 
 	// Test storing client
-	client := &ClientInfo{
+	client := &types.ClientInfo{
 		ClientID:                clientID,
 		ClientSecret:            clientSecret,
 		RedirectUris:            []string{"https://test.example.com/callback"},
@@ -114,7 +112,7 @@ func testClientOperations(t *testing.T, db *Database) {
 	assert.Error(t, err)
 }
 
-func testGrantOperations(t *testing.T, db *Database) {
+func testGrantOperations(t *testing.T, db *Store) {
 	clientID, err := generateRandomString(16)
 	require.NoError(t, err)
 
@@ -125,7 +123,7 @@ func testGrantOperations(t *testing.T, db *Database) {
 	require.NoError(t, err)
 
 	// Test storing grant
-	grant := &Grant{
+	grant := &types.Grant{
 		ID:                  grantID,
 		ClientID:            clientID,
 		UserID:              userID,
@@ -167,11 +165,11 @@ func generateRandomString(length int) (string, error) {
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
 }
-func testTokenOperations(t *testing.T, db *Database) {
+func testTokenOperations(t *testing.T, db *Store) {
 	grantID, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	grant := &Grant{
+	grant := &types.Grant{
 		ID:       grantID,
 		ClientID: "test_client_db",
 		UserID:   "test_user_123",
@@ -189,7 +187,7 @@ func testTokenOperations(t *testing.T, db *Database) {
 	require.NoError(t, err)
 
 	// Test storing token
-	tokenData := &TokenData{
+	tokenData := &types.TokenData{
 		AccessToken:           accessTokenData,
 		RefreshToken:          refreshTokenData,
 		ClientID:              "test_client_db",
@@ -248,7 +246,7 @@ func testTokenOperations(t *testing.T, db *Database) {
 	assert.Error(t, err)
 }
 
-func testAuthCodeOperations(t *testing.T, db *Database) {
+func testAuthCodeOperations(t *testing.T, db *Store) {
 	// Test storing authorization code
 	code, err := generateRandomString(16)
 	require.NoError(t, err)
@@ -259,7 +257,7 @@ func testAuthCodeOperations(t *testing.T, db *Database) {
 	userID, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	grant := &Grant{
+	grant := &types.Grant{
 		ID:       grantID,
 		ClientID: "test_client_db",
 		UserID:   userID,
@@ -288,14 +286,14 @@ func testAuthCodeOperations(t *testing.T, db *Database) {
 	assert.Error(t, err)
 }
 
-func testCleanupOperations(t *testing.T, db *Database) {
+func testCleanupOperations(t *testing.T, db *Store) {
 	grantID, err := generateRandomString(16)
 	require.NoError(t, err)
 
 	userID, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	grant := &Grant{
+	grant := &types.Grant{
 		ID:       grantID,
 		ClientID: "test_client_db",
 		UserID:   userID,
@@ -313,7 +311,7 @@ func testCleanupOperations(t *testing.T, db *Database) {
 	require.NoError(t, err)
 
 	// Create expired tokens
-	expiredToken := &TokenData{
+	expiredToken := &types.TokenData{
 		AccessToken:           accessTokenData,
 		RefreshToken:          refreshTokenData,
 		ClientID:              "test_client_db",
@@ -372,14 +370,14 @@ func TestTokenHashing(t *testing.T) {
 	assert.Len(t, hash1, 44) // Base64 encoded SHA256 hash length
 }
 
-func testRefreshTokenExpiration(t *testing.T, db *Database) {
+func testRefreshTokenExpiration(t *testing.T, db *Store) {
 	grantID, err := generateRandomString(16)
 	require.NoError(t, err)
 
 	clientID, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	grant := &Grant{
+	grant := &types.Grant{
 		ID:        grantID,
 		ClientID:  clientID,
 		UserID:    "test_user_123",
@@ -397,7 +395,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Database) {
 	refreshToken1, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	tokenData1 := &TokenData{
+	tokenData1 := &types.TokenData{
 		AccessToken:  accessToken1,
 		RefreshToken: refreshToken1,
 		ClientID:     clientID,
@@ -426,7 +424,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Database) {
 	require.NoError(t, err)
 
 	customExpiration := time.Now().Add(7 * 24 * time.Hour) // 7 days
-	tokenData2 := &TokenData{
+	tokenData2 := &types.TokenData{
 		AccessToken:           accessToken2,
 		RefreshToken:          refreshToken2,
 		ClientID:              clientID,
@@ -462,7 +460,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Database) {
 	refreshToken3, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	tokenData3 := &TokenData{
+	tokenData3 := &types.TokenData{
 		AccessToken:           accessToken3,
 		RefreshToken:          refreshToken3,
 		ClientID:              clientID,
@@ -484,7 +482,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Database) {
 	refreshToken4, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	tokenData4 := &TokenData{
+	tokenData4 := &types.TokenData{
 		AccessToken:           accessToken4,
 		RefreshToken:          refreshToken4,
 		ClientID:              clientID,
@@ -518,7 +516,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Database) {
 	refreshToken5, err := generateRandomString(16)
 	require.NoError(t, err)
 
-	tokenData5 := &TokenData{
+	tokenData5 := &types.TokenData{
 		AccessToken:           accessToken5,
 		RefreshToken:          refreshToken5,
 		ClientID:              clientID,
@@ -542,68 +540,4 @@ func testRefreshTokenExpiration(t *testing.T, db *Database) {
 	retrievedToken5, err := db.GetToken(accessToken5)
 	require.NoError(t, err)
 	assert.Equal(t, hashToken(accessToken5), retrievedToken5.AccessToken)
-}
-
-func testDatabaseMigration(t *testing.T, db *Database) {
-	// Test that the migration system works correctly
-
-	// Test 1: Check if column exists function works
-	exists, err := db.columnExists("access_tokens", "refresh_token_expires_at")
-	require.NoError(t, err)
-	assert.True(t, exists, "refresh_token_expires_at column should exist after migration")
-
-	// Test 2: Check that a non-existent column returns false
-	exists, err = db.columnExists("access_tokens", "non_existent_column")
-	require.NoError(t, err)
-	assert.False(t, exists, "non-existent column should return false")
-
-	// Test 3: Test migration idempotency (running migration again should not fail)
-	err = db.migrateAddRefreshTokenExpiration()
-	require.NoError(t, err, "Migration should be idempotent and not fail when run again")
-
-	// Test 4: Verify that existing tokens have refresh token expiration set
-	// Create a grant first
-	grantID, err := generateRandomString(16)
-	require.NoError(t, err)
-
-	grant := &Grant{
-		ID:        grantID,
-		ClientID:  "test_client_migration",
-		UserID:    "test_user_migration",
-		Scope:     []string{"read", "write"},
-		Metadata:  map[string]interface{}{"provider": "test"},
-		CreatedAt: time.Now().Unix(),
-		ExpiresAt: time.Now().Add(time.Hour).Unix(),
-	}
-
-	err = db.StoreGrant(grant)
-	require.NoError(t, err)
-
-	// Store a token
-	accessToken, err := generateRandomString(16)
-	require.NoError(t, err)
-	refreshToken, err := generateRandomString(16)
-	require.NoError(t, err)
-
-	tokenData := &TokenData{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ClientID:     "test_client_migration",
-		UserID:       "test_user_migration",
-		GrantID:      grantID,
-		Scope:        "read write",
-		ExpiresAt:    time.Now().Add(time.Hour),
-		// RefreshTokenExpiresAt will be set automatically
-	}
-
-	err = db.StoreToken(tokenData)
-	require.NoError(t, err)
-
-	// Verify the token has refresh token expiration set
-	retrievedToken, err := db.GetToken(accessToken)
-	require.NoError(t, err)
-	assert.True(t, retrievedToken.RefreshTokenExpiresAt.After(time.Now().Add(29*24*time.Hour)),
-		"Refresh token should expire in approximately 30 days")
-	assert.True(t, retrievedToken.RefreshTokenExpiresAt.Before(time.Now().Add(31*24*time.Hour)),
-		"Refresh token should expire in approximately 30 days")
 }

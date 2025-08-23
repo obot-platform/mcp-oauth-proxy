@@ -1,10 +1,11 @@
-package database
+package db
 
 import (
 	"os"
 	"testing"
 	"time"
 
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +22,7 @@ func TestSQLiteDatabase(t *testing.T) {
 	}()
 
 	// Test SQLite database without DSN
-	db, err := NewDatabase("")
+	db, err := New("")
 	require.NoError(t, err)
 	defer func() {
 		if err := db.Close(); err != nil {
@@ -34,7 +35,7 @@ func TestSQLiteDatabase(t *testing.T) {
 
 	t.Run("TestClientOperations", func(t *testing.T) {
 		// Test client operations
-		client := &ClientInfo{
+		client := &types.ClientInfo{
 			ClientID:     "test_client_sqlite",
 			ClientSecret: "test_secret",
 			RedirectUris: []string{"http://localhost:8080/callback"},
@@ -57,7 +58,7 @@ func TestSQLiteDatabase(t *testing.T) {
 
 	t.Run("TestGrantOperations", func(t *testing.T) {
 		// Test grant operations
-		grant := &Grant{
+		grant := &types.Grant{
 			ID:        "test_grant_sqlite",
 			ClientID:  "test_client_sqlite",
 			UserID:    "test_user",
@@ -85,7 +86,7 @@ func TestSQLiteDatabase(t *testing.T) {
 
 	t.Run("TestTokenOperations", func(t *testing.T) {
 		// Test token operations
-		tokenData := &TokenData{
+		tokenData := &types.TokenData{
 			AccessToken:  "test_access_token_sqlite",
 			RefreshToken: "test_refresh_token_sqlite",
 			ClientID:     "test_client_sqlite",
