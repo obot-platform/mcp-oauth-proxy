@@ -1,7 +1,6 @@
 package tokens
 
 import (
-	"crypto/rand"
 	"fmt"
 	"strings"
 	"time"
@@ -11,8 +10,7 @@ import (
 
 // TokenManager handles token generation and validation
 type TokenManager struct {
-	secretKey []byte
-	db        Database
+	db Database
 }
 
 // Database interface for token operations
@@ -30,15 +28,8 @@ type TokenClaims struct {
 
 // NewTokenManager creates a new token manager
 func NewTokenManager(db Database) (*TokenManager, error) {
-	// Generate a random secret key if not provided
-	secretKey := make([]byte, 32)
-	if _, err := rand.Read(secretKey); err != nil {
-		return nil, fmt.Errorf("failed to generate secret key: %w", err)
-	}
-
 	return &TokenManager{
-		secretKey: secretKey,
-		db:        db,
+		db: db,
 	}, nil
 }
 
