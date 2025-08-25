@@ -8,7 +8,10 @@ import (
 )
 
 func main() {
-	proxy, err := proxy.NewOAuthProxy()
+	// Load configuration from environment variables
+	config := proxy.LoadConfigFromEnv()
+
+	proxy, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to create OAuth proxy: %v", err)
 	}

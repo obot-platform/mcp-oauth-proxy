@@ -40,14 +40,27 @@ type OAuthProxy struct {
 	encryptionKey []byte
 	resourceName  string
 	lock          sync.Mutex
+	config        *types.Config
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-// JSON is a helper function to write JSON responses
-func NewOAuthProxy() (*OAuthProxy, error) {
-	databaseDSN := os.Getenv("DATABASE_DSN")
+// LoadConfigFromEnv loads configuration from environment variables
+func LoadConfigFromEnv() *types.Config {
+	return &types.Config{
+		DatabaseDSN:       os.Getenv("DATABASE_DSN"),
+		OAuthClientID:     os.Getenv("OAUTH_CLIENT_ID"),
+		OAuthClientSecret: os.Getenv("OAUTH_CLIENT_SECRET"),
+		OAuthAuthorizeURL: os.Getenv("OAUTH_AUTHORIZE_URL"),
+		ScopesSupported:   os.Getenv("SCOPES_SUPPORTED"),
+		EncryptionKey:     os.Getenv("ENCRYPTION_KEY"),
+		MCPServerURL:      os.Getenv("MCP_SERVER_URL"),
+	}
+}
+
+func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
+	databaseDSN := config.DatabaseDSN
 
 	// Log database configuration
 	if databaseDSN == "" {
@@ -75,8 +88,8 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	provider := ""
 
 	// Register generic provider
-	if os.Getenv("OAUTH_CLIENT_ID") != "" && os.Getenv("OAUTH_CLIENT_SECRET") != "" && os.Getenv("OAUTH_AUTHORIZE_URL") != "" {
-		genericProvider := providers.NewGenericProvider()
+	if config.OAuthClientID != "" && config.OAuthClientSecret != "" && config.OAuthAuthorizeURL != "" {
+		genericProvider := providers.NewGenericProvider(config.OAuthAuthorizeURL)
 		providerManager.RegisterProvider("generic", genericProvider)
 		provider = "generic"
 	}
@@ -88,19 +101,19 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 	}
 
 	// Split and trim scopes to handle whitespace
-	scopesSupported := ParseScopesSupported(os.Getenv("SCOPES_SUPPORTED"))
+	scopesSupported := ParseScopesSupported(config.ScopesSupported)
 
 	metadata := &types.OAuthMetadata{
 		ResponseTypesSupported:                   []string{"code"},
 		CodeChallengeMethodsSupported:            []string{"S256"},
-		TokenEndpointAuthMethodsSupported:        []string{"client_secret_post"},
+		TokenEndpointAuthMethodsSupported:        []string{"client_secret_post", "none"},
 		GrantTypesSupported:                      []string{"authorization_code", "refresh_token"},
 		ScopesSupported:                          scopesSupported,
-		RevocationEndpointAuthMethodsSupported:   []string{"client_secret_post"},
+		RevocationEndpointAuthMethodsSupported:   []string{"client_secret_post", "none"},
 		RegistrationEndpointAuthMethodsSupported: []string{"client_secret_post"},
 	}
 
-	encryptionKey, err := base64.StdEncoding.DecodeString(os.Getenv("ENCRYPTION_KEY"))
+	encryptionKey, err := base64.StdEncoding.DecodeString(config.EncryptionKey)
 	if err != nil {
 		log.Fatalf("Failed to decode encryption key: %v", err)
 	}
@@ -114,7 +127,28 @@ func NewOAuthProxy() (*OAuthProxy, error) {
 		provider:      provider,
 		resourceName:  "MCP Tools",
 		encryptionKey: encryptionKey,
+		config:        config,
 	}, nil
+}
+
+// GetOAuthClientID returns the OAuth client ID from config
+func (p *OAuthProxy) GetOAuthClientID() string {
+	return p.config.OAuthClientID
+}
+
+// GetOAuthClientSecret returns the OAuth client secret from config
+func (p *OAuthProxy) GetOAuthClientSecret() string {
+	return p.config.OAuthClientSecret
+}
+
+// GetOAuthAuthorizeURL returns the OAuth authorization URL from config
+func (p *OAuthProxy) GetOAuthAuthorizeURL() string {
+	return p.config.OAuthAuthorizeURL
+}
+
+// GetMCPServerURL returns the MCP server URL from config
+func (p *OAuthProxy) GetMCPServerURL() string {
+	return p.config.MCPServerURL
 }
 
 func (p *OAuthProxy) Close() error {
@@ -153,9 +187,9 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 		log.Fatalf("Failed to get provider: %v", err)
 	}
 
-	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported)
+	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported, p.GetOAuthClientID(), p.GetOAuthClientSecret())
 	tokenHandler := token.NewHandler(p.db)
-	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey)
+	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret())
 	revokeHandler := revoke.NewHandler(p.db)
 	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey)
 
@@ -306,8 +340,8 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 					}
 
 					// Get provider credentials
-					clientID := os.Getenv("OAUTH_CLIENT_ID")
-					clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
+					clientID := p.GetOAuthClientID()
+					clientSecret := p.GetOAuthClientSecret()
 					if clientID == "" || clientSecret == "" {
 						log.Printf("OAuth credentials not configured for token refresh")
 						handlerutils.JSON(w, http.StatusInternalServerError, map[string]string{
@@ -355,10 +389,10 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 	var targetURL string
 	if path == "" {
 		// If no path is provided, use the MCP server URL directly
-		targetURL = os.Getenv("MCP_SERVER_URL")
+		targetURL = p.GetMCPServerURL()
 	} else {
 		// If path is provided, append it to the MCP server URL
-		targetURL = os.Getenv("MCP_SERVER_URL") + "/" + path
+		targetURL = p.GetMCPServerURL() + "/" + path
 	}
 
 	// Log the proxy request for debugging

@@ -70,23 +70,22 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Generate client ID and secret
 	clientID := encryption.GenerateRandomString(16)
+	clientSecret := ""
 
 	// Generate client secret for confidential clients
 	if clientInfo.TokenEndpointAuthMethod != "none" {
-		handlerutils.JSON(w, http.StatusNotImplemented, types.OAuthError{
-			Error:            "unimplemented_feature",
-			ErrorDescription: "Client secret generation is not implemented",
-		})
-		return
+		clientSecret = encryption.GenerateRandomString(32)
 	}
 
 	// Set registration date
 	clientInfo.ClientID = clientID
+	clientInfo.ClientSecret = clientSecret
 	clientInfo.RegistrationDate = time.Now().Unix()
 
 	// Convert to database.ClientInfo
 	dbClientInfo := &types.ClientInfo{
 		ClientID:                clientInfo.ClientID,
+		ClientSecret:            clientInfo.ClientSecret,
 		RedirectUris:            clientInfo.RedirectUris,
 		ClientName:              clientInfo.ClientName,
 		LogoURI:                 clientInfo.LogoURI,
@@ -130,6 +129,12 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"client_id_issued_at":        clientInfo.RegistrationDate,
 	}
 
+	// Include client secret in response for confidential clients
+	if clientSecret != "" {
+		response["client_secret"] = clientSecret
+		response["client_secret_expires_at"] = 0 // Never expires
+	}
+
 	handlerutils.JSON(w, http.StatusCreated, response)
 }
 
@@ -171,6 +176,24 @@ func (p *Handler) validateClientMetadata(metadata map[string]interface{}) (*type
 	}
 	if authMethod == "" {
 		authMethod = "client_secret_basic"
+	}
+
+	// Validate that the auth method is supported
+	validAuthMethods := []string{
+		"none",
+		"client_secret_post",
+	}
+
+	isValidAuthMethod := false
+	for _, validMethod := range validAuthMethods {
+		if authMethod == validMethod {
+			isValidAuthMethod = true
+			break
+		}
+	}
+
+	if !isValidAuthMethod {
+		return nil, fmt.Errorf("unsupported token_endpoint_auth_method: %s. Supported methods: %v", authMethod, validAuthMethods)
 	}
 
 	// Validate redirect_uris (required)

@@ -61,7 +61,8 @@ func TestIntegrationFlow(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	oauthProxy, err := proxy.NewOAuthProxy()
+	config := proxy.LoadConfigFromEnv()
+	oauthProxy, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		t.Skipf("Skipping test due to database connection error: %v", err)
 	}
@@ -164,7 +165,8 @@ func TestOAuthProxyCreation(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	oauthProxy, err := proxy.NewOAuthProxy()
+	config := proxy.LoadConfigFromEnv()
+	oauthProxy, err := proxy.NewOAuthProxy(config)
 	require.NoError(t, err, "Should be able to create OAuth proxy with valid environment")
 	require.NotNil(t, oauthProxy, "OAuth proxy should not be nil")
 
@@ -213,7 +215,8 @@ func TestOAuthProxyStart(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	oauthProxy, err := proxy.NewOAuthProxy()
+	config := proxy.LoadConfigFromEnv()
+	oauthProxy, err := proxy.NewOAuthProxy(config)
 	require.NoError(t, err)
 	defer func() {
 		_ = oauthProxy.Close()
