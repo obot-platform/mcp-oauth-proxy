@@ -12,5 +12,5 @@ func GenerateRandomString(length int) string {
 	if _, err := rand.Read(bytes); err != nil {
 		panic(fmt.Errorf("failed to generate random string: %w", err))
 	}
-	return base64.RawStdEncoding.EncodeToString(bytes)
+	return base64.RawURLEncoding.EncodeToString(bytes)
 }
