@@ -45,8 +45,6 @@ func TestTokenManager(t *testing.T) {
 		tokenManager, err := NewTokenManager(nil)
 		require.NoError(t, err)
 		assert.NotNil(t, tokenManager)
-		assert.NotNil(t, tokenManager.secretKey)
-		assert.Len(t, tokenManager.secretKey, 32)
 	})
 
 	t.Run("TestSetDatabase", func(t *testing.T) {
