@@ -1,14 +1,12 @@
 package authorize
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/handlerutils"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
@@ -16,19 +14,24 @@ import (
 
 type AuthorizationStore interface {
 	GetClient(clientID string) (*types.ClientInfo, error)
+	StoreAuthRequest(key string, data map[string]interface{}) error
 }
 
 type Handler struct {
 	db              AuthorizationStore
 	provider        providers.Provider
 	scopesSupported []string
+	clientID        string
+	clientSecret    string
 }
 
-func NewHandler(db AuthorizationStore, provider providers.Provider, scopesSupported []string) http.Handler {
+func NewHandler(db AuthorizationStore, provider providers.Provider, scopesSupported []string, clientID, clientSecret string) http.Handler {
 	return &Handler{
 		db:              db,
 		provider:        provider,
 		scopesSupported: scopesSupported,
+		clientID:        clientID,
+		clientSecret:    clientSecret,
 	}
 }
 
@@ -107,12 +110,8 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the provider's client ID and secret
-	clientID := os.Getenv("OAUTH_CLIENT_ID")
-	clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
-
 	// Check if provider is configured
-	if clientID == "" || clientSecret == "" {
+	if p.clientID == "" || p.clientSecret == "" {
 		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "OAuth provider not configured",
@@ -120,24 +119,36 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stateData, err := json.Marshal(authReq)
-	if err != nil {
+	// Generate a random state key
+	stateKey := encryption.GenerateRandomString(32)
+
+	// Store the auth request data in the database
+	authData := map[string]interface{}{
+		"response_type":         authReq.ResponseType,
+		"client_id":             authReq.ClientID,
+		"redirect_uri":          authReq.RedirectURI,
+		"scope":                 authReq.Scope,
+		"state":                 authReq.State,
+		"code_challenge":        authReq.CodeChallenge,
+		"code_challenge_method": authReq.CodeChallengeMethod,
+	}
+
+	if err := p.db.StoreAuthRequest(stateKey, authData); err != nil {
 		handlerutils.JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",
-			ErrorDescription: "Failed to marshal state data",
+			ErrorDescription: "Failed to store authorization request",
 		})
 		return
 	}
 
-	encodedState := base64.URLEncoding.EncodeToString(stateData)
 	redirectURI := fmt.Sprintf("%s/callback", handlerutils.GetBaseURL(r))
 
 	// Generate authorization URL with the provider
 	authURL := p.provider.GetAuthorizationURL(
-		clientID,
+		p.clientID,
 		redirectURI,
 		authReq.Scope,
-		encodedState,
+		stateKey,
 	)
 
 	// Redirect to the provider's authorization URL

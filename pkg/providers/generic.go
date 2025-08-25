@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -15,22 +14,14 @@ import (
 
 // GenericProvider implements a generic OAuth provider
 type GenericProvider struct {
-	clientID     string
-	clientSecret string
 	authorizeURL string
 	metadata     *types.OAuthMetadata
 	httpClient   *http.Client
 }
 
 // NewGenericProvider creates a new generic OAuth provider
-func NewGenericProvider() *GenericProvider {
-	clientID := os.Getenv("OAUTH_CLIENT_ID")
-	clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
-	authorizeURL := os.Getenv("OAUTH_AUTHORIZE_URL")
-
+func NewGenericProvider(authorizeURL string) *GenericProvider {
 	return &GenericProvider{
-		clientID:     clientID,
-		clientSecret: clientSecret,
 		authorizeURL: authorizeURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,

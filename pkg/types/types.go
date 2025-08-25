@@ -4,6 +4,17 @@ import (
 	"time"
 )
 
+// Config holds all configuration values for the OAuth proxy
+type Config struct {
+	DatabaseDSN       string
+	OAuthClientID     string
+	OAuthClientSecret string
+	OAuthAuthorizeURL string
+	ScopesSupported   string
+	EncryptionKey     string
+	MCPServerURL      string
+}
+
 // TokenData represents stored token data for OAuth 2.1 compliance
 type TokenData struct {
 	AccessToken           string `gorm:"primaryKey"`
@@ -38,6 +49,14 @@ type AuthorizationCode struct {
 	Code      string    `gorm:"primaryKey"`
 	GrantID   string    `gorm:"not null"`
 	UserID    string    `gorm:"not null"`
+	ExpiresAt time.Time `gorm:"not null;index"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+}
+
+// StoredAuthRequest represents a stored OAuth authorization request for state management
+type StoredAuthRequest struct {
+	Key       string    `gorm:"primaryKey"`
+	Data      JSON      `gorm:"type:jsonb;not null"`
 	ExpiresAt time.Time `gorm:"not null;index"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }

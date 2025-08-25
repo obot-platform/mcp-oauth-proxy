@@ -79,6 +79,7 @@ func (d *Store) setupSchema() error {
 		&types.Grant{},
 		&types.AuthorizationCode{},
 		&types.TokenData{},
+		&types.StoredAuthRequest{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate database schema: %w", err)
@@ -334,6 +335,50 @@ func (d *Store) CleanupExpiredTokens() error {
 		fmt.Printf("Deleted %d expired grants\n", result.RowsAffected)
 	}
 
+	// Delete expired auth requests
+	if err := d.CleanupExpiredAuthRequests(); err != nil {
+		return fmt.Errorf("failed to cleanup expired auth requests: %w", err)
+	}
+
+	return nil
+}
+
+// StoreAuthRequest stores an authorization request with a 15-minute TTL
+func (d *Store) StoreAuthRequest(key string, data map[string]interface{}) error {
+	authRequest := &types.StoredAuthRequest{
+		Key:       key,
+		Data:      types.JSON(data),
+		ExpiresAt: time.Now().Add(15 * time.Minute), // 15-minute TTL
+	}
+	return d.db.Create(authRequest).Error
+}
+
+// GetAuthRequest retrieves an authorization request by key and checks TTL
+func (d *Store) GetAuthRequest(key string) (map[string]interface{}, error) {
+	var authRequest types.StoredAuthRequest
+	err := d.db.First(&authRequest, "key = ? AND expires_at > ?", key, time.Now()).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert JSON back to map
+	return map[string]interface{}(authRequest.Data), nil
+}
+
+// DeleteAuthRequest deletes an authorization request by key
+func (d *Store) DeleteAuthRequest(key string) error {
+	return d.db.Delete(&types.StoredAuthRequest{}, "key = ?", key).Error
+}
+
+// CleanupExpiredAuthRequests removes expired authorization requests
+func (d *Store) CleanupExpiredAuthRequests() error {
+	result := d.db.Where("expires_at < ?", time.Now()).Delete(&types.StoredAuthRequest{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to cleanup expired auth requests: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		fmt.Printf("Deleted %d expired auth requests\n", result.RowsAffected)
+	}
 	return nil
 }
 

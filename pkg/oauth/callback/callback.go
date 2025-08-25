@@ -1,13 +1,10 @@
 package callback
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -20,20 +17,46 @@ import (
 type Store interface {
 	StoreGrant(grant *types.Grant) error
 	StoreAuthCode(code, grantID, userID string) error
+	GetAuthRequest(key string) (map[string]interface{}, error)
+	DeleteAuthRequest(key string) error
 }
 
 type Handler struct {
 	db            Store
 	provider      providers.Provider
 	encryptionKey []byte
+	clientID      string
+	clientSecret  string
 }
 
-func NewHandler(db Store, provider providers.Provider, encryptionKey []byte) http.Handler {
+func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret string) http.Handler {
 	return &Handler{
 		db:            db,
 		provider:      provider,
 		encryptionKey: encryptionKey,
+		clientID:      clientID,
+		clientSecret:  clientSecret,
 	}
+}
+
+// scopeContainsProfileOrEmail checks if the given scopes contain profile or email
+func (p *Handler) scopeContainsProfileOrEmail(scopes []string) bool {
+	for _, scope := range scopes {
+		if scope == "profile" || scope == "email" {
+			return true
+		}
+	}
+	return false
+}
+
+// getStringFromMap safely extracts a string value from a map[string]interface{}
+func getStringFromMap(data map[string]interface{}, key string) string {
+	if value, ok := data[key]; ok {
+		if str, ok := value.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,30 +84,39 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var authReq types.AuthRequest
-	stateData, err := base64.URLEncoding.DecodeString(state)
+	// Retrieve auth request data from database using state as key
+	authData, err := p.db.GetAuthRequest(state)
 	if err != nil {
 		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
-			ErrorDescription: "Invalid state parameter",
-		})
-		return
-	}
-	if err := json.Unmarshal(stateData, &authReq); err != nil {
-		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
-			Error:            "invalid_request",
-			ErrorDescription: "Invalid state parameter",
+			ErrorDescription: "Invalid or expired state parameter",
 		})
 		return
 	}
 
+	// Convert auth data back to AuthRequest struct
+	authReq := types.AuthRequest{
+		ResponseType:        getStringFromMap(authData, "response_type"),
+		ClientID:            getStringFromMap(authData, "client_id"),
+		RedirectURI:         getStringFromMap(authData, "redirect_uri"),
+		Scope:               getStringFromMap(authData, "scope"),
+		State:               getStringFromMap(authData, "state"),
+		CodeChallenge:       getStringFromMap(authData, "code_challenge"),
+		CodeChallengeMethod: getStringFromMap(authData, "code_challenge_method"),
+	}
+
+	// Clean up the auth request data after successful retrieval
+	defer func() {
+		if err := p.db.DeleteAuthRequest(state); err != nil {
+			log.Printf("Failed to delete auth request: %v", err)
+		}
+	}()
+
 	// Get provider credentials
-	clientID := os.Getenv("OAUTH_CLIENT_ID")
-	clientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
 	redirectURI := fmt.Sprintf("%s/callback", handlerutils.GetBaseURL(r))
 
 	// Exchange code for tokens
-	tokenInfo, err := p.provider.ExchangeCodeForToken(r.Context(), code, clientID, clientSecret, redirectURI)
+	tokenInfo, err := p.provider.ExchangeCodeForToken(r.Context(), code, p.clientID, p.clientSecret, redirectURI)
 	if err != nil {
 		log.Printf("Failed to exchange code for token: %v", err)
 		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
@@ -94,15 +126,22 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user info from the provider
-	userInfo, err := p.provider.GetUserInfo(r.Context(), tokenInfo.AccessToken)
-	if err != nil {
-		log.Printf("Failed to get user info: %v", err)
-		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
-			Error:            "invalid_grant",
-			ErrorDescription: "Failed to get user information",
-		})
-		return
+	// Check if scope includes profile or email before getting user info
+	scopes := strings.Fields(authReq.Scope)
+	needsUserInfo := p.scopeContainsProfileOrEmail(scopes)
+
+	userInfo := &providers.UserInfo{}
+	if needsUserInfo {
+		// Get user info from the provider
+		userInfo, err = p.provider.GetUserInfo(r.Context(), tokenInfo.AccessToken)
+		if err != nil {
+			log.Printf("Failed to get user info: %v", err)
+			handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
+				Error:            "invalid_grant",
+				ErrorDescription: "Failed to get user information",
+			})
+			return
+		}
 	}
 
 	// Create a grant for this user
@@ -111,11 +150,15 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare sensitive props data
 	sensitiveProps := map[string]interface{}{
-		"email":         userInfo.Email,
-		"name":          userInfo.Name,
 		"access_token":  tokenInfo.AccessToken,
 		"refresh_token": tokenInfo.RefreshToken,
 		"expires_at":    tokenInfo.ExpireAt,
+	}
+
+	// Only add user info if we have it
+	if needsUserInfo {
+		sensitiveProps["email"] = userInfo.Email
+		sensitiveProps["name"] = userInfo.Name
 	}
 
 	// Initialize props map
@@ -138,17 +181,13 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	props["algorithm"] = encryptedProps.Algorithm
 	props["encrypted"] = true
 
-	// Add non-sensitive data
-	props["user_id"] = userInfo.ID
-
 	grant := &types.Grant{
 		ID:       grantID,
 		ClientID: authReq.ClientID,
 		UserID:   userInfo.ID,
-		Scope:    strings.Fields(authReq.Scope),
+		Scope:    scopes,
 		Metadata: map[string]interface{}{
 			"provider": p.provider,
-			"label":    userInfo.Name,
 		},
 		Props:               props,
 		CreatedAt:           now,
