@@ -17,7 +17,7 @@ type EncryptedProps struct {
 }
 
 // EncryptData encrypts sensitive data using AES-256-GCM
-func EncryptData(data map[string]interface{}, encryptionKey []byte) (*EncryptedProps, error) {
+func EncryptData(data map[string]any, encryptionKey []byte) (*EncryptedProps, error) {
 	// Convert data to JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -53,7 +53,7 @@ func EncryptData(data map[string]interface{}, encryptionKey []byte) (*EncryptedP
 }
 
 // DecryptData decrypts encrypted data using AES-256-GCM
-func DecryptData(encryptedProps *EncryptedProps, encryptionKey []byte) (map[string]interface{}, error) {
+func DecryptData(encryptedProps *EncryptedProps, encryptionKey []byte) (map[string]any, error) {
 	// Decode base64 data
 	ciphertext, err := base64.StdEncoding.DecodeString(encryptedProps.Data)
 	if err != nil {
@@ -84,7 +84,7 @@ func DecryptData(encryptedProps *EncryptedProps, encryptionKey []byte) (map[stri
 	}
 
 	// Unmarshal JSON data
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(plaintext, &data); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal decrypted data: %w", err)
 	}
@@ -93,7 +93,7 @@ func DecryptData(encryptedProps *EncryptedProps, encryptionKey []byte) (map[stri
 }
 
 // DecryptPropsIfNeeded decrypts props data if it's encrypted, otherwise returns the original data
-func DecryptPropsIfNeeded(encryptionKey []byte, props map[string]interface{}) (map[string]interface{}, error) {
+func DecryptPropsIfNeeded(encryptionKey []byte, props map[string]any) (map[string]any, error) {
 	// Check if data is encrypted
 	encrypted, ok := props["encrypted"].(bool)
 	if !ok || !encrypted {
@@ -131,7 +131,7 @@ func DecryptPropsIfNeeded(encryptionKey []byte, props map[string]interface{}) (m
 	}
 
 	// Merge decrypted data with non-sensitive props
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for key, value := range props {
 		if key != "encrypted_data" && key != "iv" && key != "algorithm" && key != "encrypted" {
 			result[key] = value

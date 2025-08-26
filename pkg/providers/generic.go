@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
+	"golang.org/x/oauth2"
 )
 
 // GenericProvider implements a generic OAuth provider
@@ -45,18 +46,14 @@ func (p *GenericProvider) discoverEndpoints() error {
 
 	// Try different well-known paths
 	wellKnownPaths := []string{
-		"/.well-known/oauth-authorization-server",
-		"/.well-known/openid-configuration",
+		"/.well-known/oauth-authorization-server" + parsedURL.Path,
+		fmt.Sprintf("%s/.well-known/oauth-authorization-server", strings.TrimSuffix(parsedURL.Path, "/")),
+		"/.well-known/openid-configuration" + parsedURL.Path,
+		fmt.Sprintf("%s/.well-known/openid-configuration", strings.TrimSuffix(parsedURL.Path, "/")),
 	}
 
 	for _, path := range wellKnownPaths {
-		var metadataURL string
-		if path == "/.well-known/oauth-authorization-server" {
-			metadataURL = baseURL + path + parsedURL.Path
-		} else {
-			metadataURL = baseURL + parsedURL.Path + path
-		}
-		metadata, err := p.fetchMetadata(metadataURL)
+		metadata, err := p.fetchMetadata(baseURL + path)
 		if err == nil && metadata != nil {
 			p.metadata = metadata
 
@@ -109,145 +106,36 @@ func (p *GenericProvider) fetchMetadata(metadataURL string) (*types.OAuthMetadat
 
 // GetAuthorizationURL returns the authorization URL for the provider
 func (p *GenericProvider) GetAuthorizationURL(clientID, redirectURI, scope, state string) string {
-	if err := p.discoverEndpoints(); err != nil {
-		// Fallback to basic URL construction
-		u, _ := url.Parse(p.authorizeURL)
-		q := u.Query()
-		q.Set("response_type", "code")
-		q.Set("client_id", clientID)
-		q.Set("redirect_uri", redirectURI)
-		q.Set("scope", scope)
-		q.Set("state", state)
-
-		// Add provider-specific parameters for refresh tokens
-		p.addRefreshTokenParams(q)
-
-		u.RawQuery = q.Encode()
-		return u.String()
-	}
-
-	u, _ := url.Parse(p.metadata.AuthorizationEndpoint)
-	q := u.Query()
-	q.Set("response_type", "code")
-	q.Set("client_id", clientID)
-	q.Set("redirect_uri", redirectURI)
-	q.Set("scope", scope)
-	q.Set("state", state)
-
-	// Add provider-specific parameters for refresh tokens
-	p.addRefreshTokenParams(q)
-
-	u.RawQuery = q.Encode()
-	return u.String()
+	return p.GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, "")
 }
 
 // GetAuthorizationURLWithPKCE returns the authorization URL with PKCE support
-func (p *GenericProvider) GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod string) string {
-	if err := p.discoverEndpoints(); err != nil {
-		// Fallback to basic URL construction
-		u, _ := url.Parse(p.authorizeURL)
-		q := u.Query()
-		q.Set("response_type", "code")
-		q.Set("client_id", clientID)
-		q.Set("redirect_uri", redirectURI)
-		q.Set("scope", scope)
-		q.Set("state", state)
-		q.Set("code_challenge", codeChallenge)
-		q.Set("code_challenge_method", codeChallengeMethod)
-
-		// Add provider-specific parameters for refresh tokens
-		p.addRefreshTokenParams(q)
-
-		u.RawQuery = q.Encode()
-		return u.String()
+func (p *GenericProvider) GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, codeChallenge string) string {
+	// Fallback to basic URL construction
+	authURL := p.authorizeURL
+	if err := p.discoverEndpoints(); err == nil {
+		authURL = p.metadata.AuthorizationEndpoint
 	}
 
-	u, _ := url.Parse(p.metadata.AuthorizationEndpoint)
-	q := u.Query()
-	q.Set("response_type", "code")
-	q.Set("client_id", clientID)
-	q.Set("redirect_uri", redirectURI)
-	q.Set("scope", scope)
-	q.Set("state", state)
-	q.Set("code_challenge", codeChallenge)
-	q.Set("code_challenge_method", codeChallengeMethod)
+	o := p.buildOAuth2Config(authURL, clientID, "", redirectURI, scope)
 
-	// Add provider-specific parameters for refresh tokens
-	p.addRefreshTokenParams(q)
-
-	u.RawQuery = q.Encode()
-	return u.String()
+	opts := []oauth2.AuthCodeOption{
+		oauth2.AccessTypeOffline,
+		oauth2.ApprovalForce,
+	}
+	if codeChallenge != "" {
+		opts = append(opts, oauth2.S256ChallengeOption(codeChallenge))
+	}
+	return o.AuthCodeURL(state, opts...)
 }
 
-// addRefreshTokenParams adds provider-specific parameters to request refresh tokens
-func (p *GenericProvider) addRefreshTokenParams(q url.Values) {
-	// Detect provider based on authorization URL or discovered endpoints
-	var isGoogle bool
-
-	if p.metadata != nil && p.metadata.AuthorizationEndpoint != "" {
-		isGoogle = strings.Contains(p.metadata.AuthorizationEndpoint, "accounts.google.com")
-	} else {
-		isGoogle = strings.Contains(p.authorizeURL, "accounts.google.com")
-	}
-
-	// Google OAuth requires specific parameters for refresh tokens
-	if isGoogle {
-		q.Set("access_type", "offline") // Request refresh token
-		q.Set("prompt", "consent")      // Always show consent screen to get refresh token
-	}
-}
-
-// ExchangeCodeForToken exchanges authorization code for tokens
-func (p *GenericProvider) ExchangeCodeForToken(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*TokenInfo, error) {
+// any exchanges authorization code for tokens
+func (p *GenericProvider) ExchangeCodeForToken(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*oauth2.Token, error) {
 	if err := p.discoverEndpoints(); err != nil {
 		return nil, fmt.Errorf("failed to discover endpoints: %w", err)
 	}
 
-	data := url.Values{}
-	data.Set("grant_type", "authorization_code")
-	data.Set("code", code)
-	data.Set("client_id", clientID)
-	data.Set("client_secret", clientSecret)
-	data.Set("redirect_uri", redirectURI)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", p.metadata.TokenEndpoint, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to exchange code for token: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail the function
-			fmt.Printf("Error closing response body: %v\n", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token exchange failed: %s", resp.Status)
-	}
-
-	var tokenResp map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to decode token response: %w", err)
-	}
-
-	tokenInfo := &TokenInfo{
-		AccessToken:  getString(tokenResp, "access_token"),
-		TokenType:    getString(tokenResp, "token_type"),
-		ExpireAt:     time.Now().Add(time.Duration(getInt(tokenResp, "expires_in")) * time.Second).Unix(),
-		RefreshToken: getString(tokenResp, "refresh_token"),
-		Scope:        getString(tokenResp, "scope"),
-		IDToken:      getString(tokenResp, "id_token"),
-	}
-
-	return tokenInfo, nil
+	return p.buildOAuth2Config(p.metadata.AuthorizationEndpoint, clientID, clientSecret, redirectURI, "").Exchange(ctx, code)
 }
 
 // GetUserInfo retrieves user information using the access token
@@ -282,7 +170,7 @@ func (p *GenericProvider) GetUserInfo(ctx context.Context, accessToken string) (
 		return nil, fmt.Errorf("userinfo request failed: %s", resp.Status)
 	}
 
-	var userInfoResp map[string]interface{}
+	var userInfoResp map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&userInfoResp); err != nil {
 		return nil, fmt.Errorf("failed to decode user info response: %w", err)
 	}
@@ -311,54 +199,31 @@ func (p *GenericProvider) GetUserInfo(ctx context.Context, accessToken string) (
 }
 
 // RefreshToken refreshes an access token using a refresh token
-func (p *GenericProvider) RefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string) (*TokenInfo, error) {
+func (p *GenericProvider) RefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string) (*oauth2.Token, error) {
 	if err := p.discoverEndpoints(); err != nil {
 		return nil, fmt.Errorf("failed to discover endpoints: %w", err)
 	}
 
-	data := url.Values{}
-	data.Set("grant_type", "refresh_token")
-	data.Set("refresh_token", refreshToken)
-	data.Set("client_id", clientID)
-	data.Set("client_secret", clientSecret)
+	return p.buildOAuth2Config(p.metadata.AuthorizationEndpoint, clientID, clientSecret, "", "").
+		TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).
+		Token()
+}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.metadata.TokenEndpoint, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+func (p *GenericProvider) buildOAuth2Config(authURL, clientID, clientSecret, redirectURI, scope string) *oauth2.Config {
+	var scopes []string
+	if scope != "" {
+		scopes = strings.Fields(scope)
 	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	return &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  redirectURI,
+		Scopes:       scopes,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  authURL,
+			TokenURL: p.metadata.TokenEndpoint,
+		},
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail the function
-			fmt.Printf("Error closing response body: %v\n", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token refresh failed: %s", resp.Status)
-	}
-
-	var tokenResp map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to decode token response: %w", err)
-	}
-
-	tokenInfo := &TokenInfo{
-		AccessToken:  getString(tokenResp, "access_token"),
-		TokenType:    getString(tokenResp, "token_type"),
-		ExpireAt:     time.Now().Add(time.Duration(getInt(tokenResp, "expires_in")) * time.Second).Unix(),
-		RefreshToken: getString(tokenResp, "refresh_token"),
-		Scope:        getString(tokenResp, "scope"),
-		IDToken:      getString(tokenResp, "id_token"),
-	}
-
-	return tokenInfo, nil
 }
 
 // GetName returns the provider name
@@ -367,23 +232,11 @@ func (p *GenericProvider) GetName() string {
 }
 
 // Helper functions
-func getString(m map[string]interface{}, key string) string {
+func getString(m map[string]any, key string) string {
 	if val, ok := m[key]; ok {
 		if str, ok := val.(string); ok {
 			return str
 		}
 	}
 	return ""
-}
-
-func getInt(m map[string]interface{}, key string) int {
-	if val, ok := m[key]; ok {
-		switch v := val.(type) {
-		case int:
-			return v
-		case float64:
-			return int(v)
-		}
-	}
-	return 0
 }

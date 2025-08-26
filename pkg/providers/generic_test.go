@@ -2,7 +2,6 @@ package providers
 
 import (
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
@@ -38,8 +37,6 @@ func TestGenericProvider_RefreshTokenParams(t *testing.T) {
 		authURL := provider.GetAuthorizationURL("test_client", "https://test.example.com/callback", "read:user user:email", "test_state")
 
 		// Should not contain Google or Microsoft specific parameters
-		assert.NotContains(t, authURL, "access_type=offline")
-		assert.NotContains(t, authURL, "prompt=consent")
 		assert.NotContains(t, authURL, "response_mode=query")
 		assert.NotContains(t, authURL, "offline_access")
 
@@ -47,34 +44,5 @@ func TestGenericProvider_RefreshTokenParams(t *testing.T) {
 		assert.Contains(t, authURL, "client_id=test_client")
 		assert.Contains(t, authURL, "scope=read%3Auser+user%3Aemail")
 		assert.Contains(t, authURL, "state=test_state")
-	})
-}
-
-func TestGenericProvider_AddRefreshTokenParams(t *testing.T) {
-	provider := &GenericProvider{}
-
-	t.Run("TestGoogleParams", func(t *testing.T) {
-		provider.authorizeURL = "https://accounts.google.com/o/oauth2/v2/auth"
-		q := url.Values{}
-
-		provider.addRefreshTokenParams(q)
-
-		assert.Equal(t, "offline", q.Get("access_type"))
-		assert.Equal(t, "consent", q.Get("prompt"))
-		assert.Equal(t, "", q.Get("response_mode"))
-	})
-
-	t.Run("TestGenericProviderParams", func(t *testing.T) {
-		provider.authorizeURL = "https://github.com/login/oauth/authorize"
-		q := url.Values{}
-		q.Set("scope", "read:user user:email")
-
-		provider.addRefreshTokenParams(q)
-
-		// Should not add any special parameters
-		assert.Equal(t, "", q.Get("access_type"))
-		assert.Equal(t, "", q.Get("prompt"))
-		assert.Equal(t, "", q.Get("response_mode"))
-		assert.Equal(t, "read:user user:email", q.Get("scope"))
 	})
 }

@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+
+	"golang.org/x/oauth2"
 )
 
 // UserInfo represents user information from OAuth provider
@@ -27,16 +29,16 @@ type Provider interface {
 	GetAuthorizationURL(clientID, redirectURI, scope, state string) string
 
 	// GetAuthorizationURLWithPKCE returns the authorization URL with PKCE support
-	GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod string) string
+	GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, codeChallenge string) string
 
 	// ExchangeCodeForToken exchanges authorization code for tokens
-	ExchangeCodeForToken(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*TokenInfo, error)
+	ExchangeCodeForToken(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*oauth2.Token, error)
 
 	// GetUserInfo retrieves user information using the access token
 	GetUserInfo(ctx context.Context, accessToken string) (*UserInfo, error)
 
 	// RefreshToken refreshes an access token using a refresh token
-	RefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string) (*TokenInfo, error)
+	RefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string) (*oauth2.Token, error)
 
 	// GetName returns the provider name
 	GetName() string

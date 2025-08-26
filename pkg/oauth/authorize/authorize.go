@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
@@ -14,7 +15,7 @@ import (
 
 type AuthorizationStore interface {
 	GetClient(clientID string) (*types.ClientInfo, error)
-	StoreAuthRequest(key string, data map[string]interface{}) error
+	StoreAuthRequest(key string, data map[string]any) error
 }
 
 type Handler struct {
@@ -94,15 +95,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate redirect URI
-	validRedirect := false
-	for _, uri := range clientInfo.RedirectUris {
-		if uri == authReq.RedirectURI {
-			validRedirect = true
-			break
-		}
-	}
-	if !validRedirect {
+	if !slices.Contains(clientInfo.RedirectUris, authReq.RedirectURI) {
 		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
 			ErrorDescription: "Invalid redirect URI",
@@ -123,7 +116,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	stateKey := encryption.GenerateRandomString(32)
 
 	// Store the auth request data in the database
-	authData := map[string]interface{}{
+	authData := map[string]any{
 		"response_type":         authReq.ResponseType,
 		"client_id":             authReq.ClientID,
 		"redirect_uri":          authReq.RedirectURI,

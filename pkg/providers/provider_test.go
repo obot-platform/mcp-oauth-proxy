@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 )
 
 // MockProviderForTest implements the Provider interface for testing
@@ -18,18 +19,16 @@ func (m *MockProviderForTest) GetAuthorizationURL(clientID, redirectURI, scope, 
 	return "https://mock-provider.com/oauth/authorize?client_id=" + clientID + "&redirect_uri=" + redirectURI + "&scope=" + scope + "&state=" + state + "&response_type=code"
 }
 
-func (m *MockProviderForTest) GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod string) string {
-	return "https://mock-provider.com/oauth/authorize?client_id=" + clientID + "&redirect_uri=" + redirectURI + "&scope=" + scope + "&state=" + state + "&response_type=code&code_challenge=" + codeChallenge + "&code_challenge_method=" + codeChallengeMethod
+func (m *MockProviderForTest) GetAuthorizationURLWithPKCE(clientID, redirectURI, scope, state, codeChallenge string) string {
+	return "https://mock-provider.com/oauth/authorize?client_id=" + clientID + "&redirect_uri=" + redirectURI + "&scope=" + scope + "&state=" + state + "&response_type=code&code_challenge=" + codeChallenge + "&code_challenge_method=S256"
 }
 
-func (m *MockProviderForTest) ExchangeCodeForToken(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*TokenInfo, error) {
-	return &TokenInfo{
+func (m *MockProviderForTest) ExchangeCodeForToken(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*oauth2.Token, error) {
+	return &oauth2.Token{
 		AccessToken:  "mock_access_token_" + code,
 		TokenType:    "Bearer",
-		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
+		Expiry:       time.Now().Add(3600 * time.Second),
 		RefreshToken: "mock_refresh_token_" + code,
-		Scope:        "read write",
-		IDToken:      "mock_id_token_" + code,
 	}, nil
 }
 
@@ -41,13 +40,12 @@ func (m *MockProviderForTest) GetUserInfo(ctx context.Context, accessToken strin
 	}, nil
 }
 
-func (m *MockProviderForTest) RefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string) (*TokenInfo, error) {
-	return &TokenInfo{
+func (m *MockProviderForTest) RefreshToken(ctx context.Context, refreshToken, clientID, clientSecret string) (*oauth2.Token, error) {
+	return &oauth2.Token{
 		AccessToken:  "mock_new_access_token",
 		TokenType:    "Bearer",
-		ExpireAt:     time.Now().Add(3600 * time.Second).Unix(),
+		Expiry:       time.Now().Add(3600 * time.Second),
 		RefreshToken: "mock_new_refresh_token",
-		Scope:        "read write",
 	}, nil
 }
 
@@ -103,7 +101,7 @@ func TestManager(t *testing.T) {
 		done := make(chan bool, 10)
 
 		// Start multiple goroutines registering providers
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			go func(id int) {
 				provider := &MockProviderForTest{name: "concurrent_provider"}
 				manager.RegisterProvider("concurrent_"+string(rune(id)), provider)
@@ -112,7 +110,7 @@ func TestManager(t *testing.T) {
 		}
 
 		// Start multiple goroutines retrieving providers
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			go func(id int) {
 				_, err := manager.GetProvider("concurrent_" + string(rune(id)))
 				// Some might not exist due to race conditions, which is expected
@@ -122,7 +120,7 @@ func TestManager(t *testing.T) {
 		}
 
 		// Wait for all goroutines to complete
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			<-done
 		}
 
@@ -147,7 +145,7 @@ func TestMockProvider(t *testing.T) {
 	})
 
 	t.Run("TestGetAuthorizationURLWithPKCE", func(t *testing.T) {
-		authURL := provider.GetAuthorizationURLWithPKCE("test_client", "https://test.example.com/callback", "read write", "test_state", "test_challenge", "S256")
+		authURL := provider.GetAuthorizationURLWithPKCE("test_client", "https://test.example.com/callback", "read write", "test_state", "test_challenge")
 		assert.Contains(t, authURL, "https://mock-provider.com/oauth/authorize")
 		assert.Contains(t, authURL, "client_id=test_client")
 		assert.Contains(t, authURL, "code_challenge=test_challenge")
@@ -160,10 +158,8 @@ func TestMockProvider(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "mock_access_token_test_code", tokenInfo.AccessToken)
 		assert.Equal(t, "Bearer", tokenInfo.TokenType)
-		assert.Greater(t, tokenInfo.ExpireAt, time.Now().Unix())
+		assert.Greater(t, tokenInfo.Expiry, time.Now())
 		assert.Equal(t, "mock_refresh_token_test_code", tokenInfo.RefreshToken)
-		assert.Equal(t, "read write", tokenInfo.Scope)
-		assert.Equal(t, "mock_id_token_test_code", tokenInfo.IDToken)
 	})
 
 	t.Run("TestGetUserInfo", func(t *testing.T) {
@@ -181,9 +177,8 @@ func TestMockProvider(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "mock_new_access_token", tokenInfo.AccessToken)
 		assert.Equal(t, "Bearer", tokenInfo.TokenType)
-		assert.Greater(t, tokenInfo.ExpireAt, time.Now().Unix())
+		assert.Greater(t, tokenInfo.Expiry, time.Now())
 		assert.Equal(t, "mock_new_refresh_token", tokenInfo.RefreshToken)
-		assert.Equal(t, "read write", tokenInfo.Scope)
 	})
 
 	t.Run("TestGetName", func(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func JSON(w http.ResponseWriter, statusCode int, obj interface{}) {
+func JSON(w http.ResponseWriter, statusCode int, obj any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if obj != nil {
