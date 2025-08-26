@@ -63,8 +63,8 @@ func TestSQLiteDatabase(t *testing.T) {
 			ClientID:  "test_client_sqlite",
 			UserID:    "test_user",
 			Scope:     []string{"openid", "profile"},
-			Metadata:  map[string]interface{}{"test": "value"},
-			Props:     map[string]interface{}{"prop": "value"},
+			Metadata:  map[string]any{"test": "value"},
+			Props:     map[string]any{"prop": "value"},
 			CreatedAt: time.Now().Unix(),
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		}

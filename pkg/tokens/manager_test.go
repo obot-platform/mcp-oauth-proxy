@@ -149,8 +149,8 @@ func TestTokenManager(t *testing.T) {
 			ClientID:  "test_client",
 			UserID:    "user123",
 			Scope:     []string{"read", "write"},
-			Metadata:  map[string]interface{}{"provider": "test"},
-			Props:     map[string]interface{}{"email": "test@example.com", "name": "Test User"},
+			Metadata:  map[string]any{"provider": "test"},
+			Props:     map[string]any{"email": "test@example.com", "name": "Test User"},
 			CreatedAt: time.Now().Unix(),
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
@@ -158,7 +158,7 @@ func TestTokenManager(t *testing.T) {
 		claims, err := tokenManager.ValidateAccessToken(validTokenWithGrant)
 		require.NoError(t, err)
 		assert.Equal(t, "user123", claims.UserID)
-		assert.Equal(t, map[string]interface{}{"email": "test@example.com", "name": "Test User"}, claims.Props)
+		assert.Equal(t, map[string]any{"email": "test@example.com", "name": "Test User"}, claims.Props)
 		assert.False(t, time.Now().After(claims.ExpiresAt))
 	})
 
@@ -189,8 +189,8 @@ func TestTokenManager(t *testing.T) {
 			ClientID:  "test_client",
 			UserID:    "user123",
 			Scope:     []string{"read", "write"},
-			Metadata:  map[string]interface{}{"provider": "test"},
-			Props:     map[string]interface{}{"email": "test@example.com", "name": "Test User"},
+			Metadata:  map[string]any{"provider": "test"},
+			Props:     map[string]any{"email": "test@example.com", "name": "Test User"},
 			CreatedAt: time.Now().Unix(),
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
@@ -198,7 +198,7 @@ func TestTokenManager(t *testing.T) {
 		tokenInfo, err := tokenManager.GetTokenInfo(validToken)
 		require.NoError(t, err)
 		assert.Equal(t, "user123", tokenInfo.UserID)
-		assert.Equal(t, map[string]interface{}{"email": "test@example.com", "name": "Test User"}, tokenInfo.Props)
+		assert.Equal(t, map[string]any{"email": "test@example.com", "name": "Test User"}, tokenInfo.Props)
 		assert.False(t, time.Now().After(tokenInfo.ExpiresAt))
 	})
 }
@@ -206,7 +206,7 @@ func TestTokenManager(t *testing.T) {
 // TestTokenClaims tests the TokenClaims struct
 func TestTokenClaims(t *testing.T) {
 	expiresAt := time.Now().Add(1 * time.Hour)
-	props := map[string]interface{}{
+	props := map[string]any{
 		"email": "test@example.com",
 		"name":  "Test User",
 		"role":  "admin",
@@ -226,7 +226,7 @@ func TestTokenClaims(t *testing.T) {
 // TestTokenInfo tests the TokenInfo struct
 func TestTokenInfo(t *testing.T) {
 	expiresAt := time.Now().Add(1 * time.Hour)
-	props := map[string]interface{}{
+	props := map[string]any{
 		"email": "test@example.com",
 		"name":  "Test User",
 	}
@@ -286,8 +286,8 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			ClientID:  "test_client",
 			UserID:    "user123",
 			Scope:     []string{"read", "write"},
-			Metadata:  map[string]interface{}{"provider": "test"},
-			Props:     map[string]interface{}{"email": "test@example.com"},
+			Metadata:  map[string]any{"provider": "test"},
+			Props:     map[string]any{"email": "test@example.com"},
 			CreatedAt: time.Now().Unix(),
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
@@ -314,8 +314,8 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			ClientID:  "test_client",
 			UserID:    "user123",
 			Scope:     []string{"read", "write"},
-			Metadata:  map[string]interface{}{"provider": "test"},
-			Props:     map[string]interface{}{"email": "test@example.com"},
+			Metadata:  map[string]any{"provider": "test"},
+			Props:     map[string]any{"email": "test@example.com"},
 			CreatedAt: time.Now().Unix(),
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
@@ -350,8 +350,8 @@ func TestConcurrentTokenValidation(t *testing.T) {
 			ClientID:  "test_client",
 			UserID:    fmt.Sprintf("user%d", i),
 			Scope:     []string{"read", "write"},
-			Metadata:  map[string]interface{}{"provider": "test"},
-			Props:     map[string]interface{}{"email": fmt.Sprintf("user%d@example.com", i)},
+			Metadata:  map[string]any{"provider": "test"},
+			Props:     map[string]any{"email": fmt.Sprintf("user%d@example.com", i)},
 			CreatedAt: time.Now().Unix(),
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}

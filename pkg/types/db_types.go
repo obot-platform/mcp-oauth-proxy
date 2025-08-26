@@ -10,7 +10,7 @@ import (
 type StringSlice []string
 
 // JSON is a custom type for handling JSON data in GORM
-type JSON map[string]interface{}
+type JSON map[string]any
 
 // Value implements the driver.Valuer interface for StringSlice
 func (s StringSlice) Value() (driver.Value, error) {
@@ -25,7 +25,7 @@ func (s StringSlice) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface for StringSlice
-func (s *StringSlice) Scan(value interface{}) error {
+func (s *StringSlice) Scan(value any) error {
 	if value == nil {
 		*s = []string{}
 		return nil
@@ -62,9 +62,9 @@ func (j JSON) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface for JSON
-func (j *JSON) Scan(value interface{}) error {
+func (j *JSON) Scan(value any) error {
 	if value == nil {
-		*j = make(map[string]interface{})
+		*j = make(map[string]any)
 		return nil
 	}
 
@@ -79,7 +79,7 @@ func (j *JSON) Scan(value interface{}) error {
 	}
 
 	if len(data) == 0 {
-		*j = make(map[string]interface{})
+		*j = make(map[string]any)
 		return nil
 	}
 

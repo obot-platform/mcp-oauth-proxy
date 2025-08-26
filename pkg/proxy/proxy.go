@@ -28,6 +28,7 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/ratelimit"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/tokens"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
+	"golang.org/x/oauth2"
 )
 
 type OAuthProxy struct {
@@ -436,7 +437,7 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateGrant updates a grant with new token information
-func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.TokenInfo, newTokenInfo *providers.TokenInfo) error {
+func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.TokenInfo, newTokenInfo *oauth2.Token) error {
 	// Get the existing grant
 	grant, err := p.db.GetGrant(grantID, userID)
 	if err != nil {
@@ -444,10 +445,10 @@ func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.To
 	}
 
 	// Prepare sensitive props data
-	sensitiveProps := map[string]interface{}{
+	sensitiveProps := map[string]any{
 		"access_token":  newTokenInfo.AccessToken,
 		"refresh_token": newTokenInfo.RefreshToken,
-		"expires_at":    newTokenInfo.ExpireAt,
+		"expires_at":    newTokenInfo.Expiry.Unix(),
 	}
 
 	// Add existing user info if available
@@ -469,7 +470,7 @@ func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.To
 	}
 
 	// Initialize props map
-	props := make(map[string]interface{})
+	props := make(map[string]any)
 
 	// Encrypt the sensitive props data
 	encryptedProps, err := encryption.EncryptData(sensitiveProps, p.encryptionKey)

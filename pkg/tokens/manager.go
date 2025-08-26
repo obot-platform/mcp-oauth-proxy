@@ -20,10 +20,10 @@ type Database interface {
 }
 
 type TokenClaims struct {
-	UserID    string                 `json:"user_id"`
-	GrantID   string                 `json:"grant_id"`
-	Props     map[string]interface{} `json:"props,omitempty"`
-	ExpiresAt time.Time              `json:"expires_at"`
+	UserID    string         `json:"user_id"`
+	GrantID   string         `json:"grant_id"`
+	Props     map[string]any `json:"props,omitempty"`
+	ExpiresAt time.Time      `json:"expires_at"`
 }
 
 // NewTokenManager creates a new token manager
@@ -100,6 +100,6 @@ func (tm *TokenManager) GetTokenInfo(tokenString string) (*TokenInfo, error) {
 type TokenInfo struct {
 	UserID    string
 	GrantID   string
-	Props     map[string]interface{}
+	Props     map[string]any
 	ExpiresAt time.Time
 }

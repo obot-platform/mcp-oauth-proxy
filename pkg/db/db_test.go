@@ -128,8 +128,8 @@ func testGrantOperations(t *testing.T, db *Store) {
 		ClientID:            clientID,
 		UserID:              userID,
 		Scope:               []string{"read", "write", "admin"},
-		Metadata:            map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
-		Props:               map[string]interface{}{"email": "test@example.com", "name": "Test User"},
+		Metadata:            map[string]any{"provider": "test", "ip": "127.0.0.1"},
+		Props:               map[string]any{"email": "test@example.com", "name": "Test User"},
 		CreatedAt:           time.Now().Unix(),
 		ExpiresAt:           time.Now().Add(10 * time.Minute).Unix(),
 		CodeChallenge:       "test_challenge",
@@ -174,7 +174,7 @@ func testTokenOperations(t *testing.T, db *Store) {
 		ClientID: "test_client_db",
 		UserID:   "test_user_123",
 		Scope:    []string{"read", "write", "admin"},
-		Metadata: map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+		Metadata: map[string]any{"provider": "test", "ip": "127.0.0.1"},
 	}
 
 	err = db.StoreGrant(grant)
@@ -262,7 +262,7 @@ func testAuthCodeOperations(t *testing.T, db *Store) {
 		ClientID: "test_client_db",
 		UserID:   userID,
 		Scope:    []string{"read", "write", "admin"},
-		Metadata: map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+		Metadata: map[string]any{"provider": "test", "ip": "127.0.0.1"},
 	}
 
 	err = db.StoreGrant(grant)
@@ -298,7 +298,7 @@ func testCleanupOperations(t *testing.T, db *Store) {
 		ClientID: "test_client_db",
 		UserID:   userID,
 		Scope:    []string{"read", "write", "admin"},
-		Metadata: map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+		Metadata: map[string]any{"provider": "test", "ip": "127.0.0.1"},
 	}
 
 	err = db.StoreGrant(grant)
@@ -382,7 +382,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		ClientID:  clientID,
 		UserID:    "test_user_123",
 		Scope:     []string{"read", "write", "admin"},
-		Metadata:  map[string]interface{}{"provider": "test", "ip": "127.0.0.1"},
+		Metadata:  map[string]any{"provider": "test", "ip": "127.0.0.1"},
 		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 	}
 

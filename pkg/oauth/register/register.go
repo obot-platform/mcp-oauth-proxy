@@ -49,7 +49,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse request.JSON body
-	var clientMetadata map[string]interface{}
+	var clientMetadata map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1024*1024)).Decode(&clientMetadata); err != nil {
 		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
 			Error:            "invalid_request",
@@ -112,7 +112,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Build response
 	baseURL := handlerutils.GetBaseURL(r)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"client_id":                  clientInfo.ClientID,
 		"redirect_uris":              clientInfo.RedirectUris,
 		"client_name":                clientInfo.ClientName,
@@ -138,9 +138,9 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handlerutils.JSON(w, http.StatusCreated, response)
 }
 
-func (p *Handler) validateClientMetadata(metadata map[string]interface{}) (*types.ClientInfo, error) {
+func (p *Handler) validateClientMetadata(metadata map[string]any) (*types.ClientInfo, error) {
 	// Helper function to validate string fields
-	validateStringField := func(field interface{}, name string) (string, error) {
+	validateStringField := func(field any, name string) (string, error) {
 		if field == nil {
 			return "", nil
 		}
@@ -151,11 +151,11 @@ func (p *Handler) validateClientMetadata(metadata map[string]interface{}) (*type
 	}
 
 	// Helper function to validate string arrays
-	validateStringArray := func(arr interface{}, name string) ([]string, error) {
+	validateStringArray := func(arr any, name string) ([]string, error) {
 		if arr == nil {
 			return nil, nil
 		}
-		if array, ok := arr.([]interface{}); ok {
+		if array, ok := arr.([]any); ok {
 			result := make([]string, len(array))
 			for i, item := range array {
 				if str, ok := item.(string); ok {

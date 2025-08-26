@@ -17,7 +17,7 @@ import (
 type Store interface {
 	StoreGrant(grant *types.Grant) error
 	StoreAuthCode(code, grantID, userID string) error
-	GetAuthRequest(key string) (map[string]interface{}, error)
+	GetAuthRequest(key string) (map[string]any, error)
 	DeleteAuthRequest(key string) error
 }
 
@@ -49,8 +49,8 @@ func (p *Handler) scopeContainsProfileOrEmail(scopes []string) bool {
 	return false
 }
 
-// getStringFromMap safely extracts a string value from a map[string]interface{}
-func getStringFromMap(data map[string]interface{}, key string) string {
+// getStringFromMap safely extracts a string value from a map[string]any
+func getStringFromMap(data map[string]any, key string) string {
 	if value, ok := data[key]; ok {
 		if str, ok := value.(string); ok {
 			return str
@@ -149,10 +149,10 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().Unix()
 
 	// Prepare sensitive props data
-	sensitiveProps := map[string]interface{}{
+	sensitiveProps := map[string]any{
 		"access_token":  tokenInfo.AccessToken,
 		"refresh_token": tokenInfo.RefreshToken,
-		"expires_at":    tokenInfo.ExpireAt,
+		"expires_at":    tokenInfo.Expiry.Unix(),
 	}
 
 	// Only add user info if we have it
@@ -162,7 +162,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Initialize props map
-	props := make(map[string]interface{})
+	props := make(map[string]any)
 
 	// Encrypt the sensitive props data
 	encryptedProps, err := encryption.EncryptData(sensitiveProps, p.encryptionKey)
@@ -186,7 +186,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClientID: authReq.ClientID,
 		UserID:   userInfo.ID,
 		Scope:    scopes,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"provider": p.provider,
 		},
 		Props:               props,

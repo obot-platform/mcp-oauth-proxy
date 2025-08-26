@@ -105,7 +105,7 @@ func (d *Store) StoreClient(client *types.ClientInfo) error {
 
 // StoreGrant stores a new grant
 func (d *Store) StoreGrant(grant *types.Grant) error {
-	// Convert []string to StringSlice and map[string]interface{} to JSON for GORM
+	// Convert []string to StringSlice and map[string]any to JSON for GORM
 	gormGrant := &types.Grant{
 		ID:                  grant.ID,
 		ClientID:            grant.ClientID,
@@ -157,8 +157,8 @@ func (d *Store) GetGrant(grantID, userID string) (*types.Grant, error) {
 		ClientID:            grant.ClientID,
 		UserID:              grant.UserID,
 		Scope:               []string(grant.Scope),
-		Metadata:            map[string]interface{}(grant.Metadata),
-		Props:               map[string]interface{}(grant.Props),
+		Metadata:            map[string]any(grant.Metadata),
+		Props:               map[string]any(grant.Props),
 		CreatedAt:           grant.CreatedAt,
 		ExpiresAt:           grant.ExpiresAt,
 		CodeChallenge:       grant.CodeChallenge,
@@ -275,7 +275,7 @@ func (d *Store) RevokeToken(token string) error {
 	now := time.Now()
 
 	// First try to revoke as access token
-	result := d.db.Model(&types.TokenData{}).Where("access_token = ?", hashedToken).Updates(map[string]interface{}{
+	result := d.db.Model(&types.TokenData{}).Where("access_token = ?", hashedToken).Updates(map[string]any{
 		"revoked":    true,
 		"revoked_at": &now,
 	})
@@ -288,7 +288,7 @@ func (d *Store) RevokeToken(token string) error {
 	}
 
 	// If not found as access token, try as refresh token
-	result = d.db.Model(&types.TokenData{}).Where("refresh_token = ?", hashedToken).Updates(map[string]interface{}{
+	result = d.db.Model(&types.TokenData{}).Where("refresh_token = ?", hashedToken).Updates(map[string]any{
 		"revoked":    true,
 		"revoked_at": &now,
 	})
@@ -344,7 +344,7 @@ func (d *Store) CleanupExpiredTokens() error {
 }
 
 // StoreAuthRequest stores an authorization request with a 15-minute TTL
-func (d *Store) StoreAuthRequest(key string, data map[string]interface{}) error {
+func (d *Store) StoreAuthRequest(key string, data map[string]any) error {
 	authRequest := &types.StoredAuthRequest{
 		Key:       key,
 		Data:      types.JSON(data),
@@ -354,7 +354,7 @@ func (d *Store) StoreAuthRequest(key string, data map[string]interface{}) error 
 }
 
 // GetAuthRequest retrieves an authorization request by key and checks TTL
-func (d *Store) GetAuthRequest(key string) (map[string]interface{}, error) {
+func (d *Store) GetAuthRequest(key string) (map[string]any, error) {
 	var authRequest types.StoredAuthRequest
 	err := d.db.First(&authRequest, "key = ? AND expires_at > ?", key, time.Now()).Error
 	if err != nil {
@@ -362,7 +362,7 @@ func (d *Store) GetAuthRequest(key string) (map[string]interface{}, error) {
 	}
 
 	// Convert JSON back to map
-	return map[string]interface{}(authRequest.Data), nil
+	return map[string]any(authRequest.Data), nil
 }
 
 // DeleteAuthRequest deletes an authorization request by key
