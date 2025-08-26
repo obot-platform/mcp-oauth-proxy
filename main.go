@@ -9,7 +9,10 @@ import (
 
 func main() {
 	// Load configuration from environment variables
-	config := proxy.LoadConfigFromEnv()
+	config, err := proxy.LoadConfigFromEnv()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 
 	proxy, err := proxy.NewOAuthProxy(config)
 	if err != nil {

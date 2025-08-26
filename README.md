@@ -271,7 +271,7 @@ You can customize the scopes based on your needs. Common additional scopes inclu
          OAUTH_CLIENT_ID: "your-oauth-client-id"
          OAUTH_CLIENT_SECRET: "your-oauth-client-secret"
          OAUTH_AUTHORIZE_URL: "https://your-oauth-provider.com/oauth/authorize"
-         MCP_SERVER_URL: "http://localhost:3000/mcp"
+         MCP_SERVER_URL: "http://localhost:3000"
          ENCRYPTION_KEY: "your-base64-encoded-32-byte-key"
        ports:
          - "8080:8080"
@@ -295,7 +295,7 @@ You can customize the scopes based on your needs. Common additional scopes inclu
          OAUTH_CLIENT_ID: "your-oauth-client-id"
          OAUTH_CLIENT_SECRET: "your-oauth-client-secret"
          OAUTH_AUTHORIZE_URL: "https://your-oauth-provider.com/oauth/authorize"
-         MCP_SERVER_URL: "http://localhost:3000/mcp"
+         MCP_SERVER_URL: "http://localhost:3000"
        volumes:
          - ./data:/app/data # Persist SQLite database
        ports:
@@ -342,7 +342,7 @@ You can customize the scopes based on your needs. Common additional scopes inclu
 
 ### MCP Proxy
 
-- `ANY /mcp/*` - Proxies requests to MCP server with user context headers
+- `ANY /*` - Proxies any request not mentioned above to MCP server with user context headers
 
 ## OAuth Flow
 

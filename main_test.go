@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -61,7 +62,10 @@ func TestIntegrationFlow(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	config := proxy.LoadConfigFromEnv()
+	config, err := proxy.LoadConfigFromEnv()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 	oauthProxy, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		t.Skipf("Skipping test due to database connection error: %v", err)
@@ -99,7 +103,7 @@ func TestIntegrationFlow(t *testing.T) {
 	// Test protected resource metadata
 	t.Run("ProtectedResourceMetadata", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp", nil)
+		req := httptest.NewRequest("GET", "/.well-known/oauth-protected-resource", nil)
 		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -165,7 +169,10 @@ func TestOAuthProxyCreation(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	config := proxy.LoadConfigFromEnv()
+	config, err := proxy.LoadConfigFromEnv()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 	oauthProxy, err := proxy.NewOAuthProxy(config)
 	require.NoError(t, err, "Should be able to create OAuth proxy with valid environment")
 	require.NotNil(t, oauthProxy, "OAuth proxy should not be nil")
@@ -215,7 +222,10 @@ func TestOAuthProxyStart(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	config := proxy.LoadConfigFromEnv()
+	config, err := proxy.LoadConfigFromEnv()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 	oauthProxy, err := proxy.NewOAuthProxy(config)
 	require.NoError(t, err)
 	defer func() {
