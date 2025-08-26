@@ -28,7 +28,7 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			// Return 401 with proper WWW-Authenticate header
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", handlerutils.GetBaseURL(r))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", handlerutils.GetBaseURL(r))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="%s"`, resourceMetadataUrl)
 			w.Header().Set("WWW-Authenticate", wwwAuthValue)
 			handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
@@ -41,7 +41,7 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 		// Parse Authorization header
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", handlerutils.GetBaseURL(r))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", handlerutils.GetBaseURL(r))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid Authorization header format, expected 'Bearer TOKEN'", resource_metadata="%s"`, resourceMetadataUrl)
 			w.Header().Set("WWW-Authenticate", wwwAuthValue)
 			handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
@@ -55,7 +55,7 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 
 		tokenInfo, err := p.tokenManager.GetTokenInfo(token)
 		if err != nil {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", handlerutils.GetBaseURL(r))
+			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", handlerutils.GetBaseURL(r))
 			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid or expired token", resource_metadata="%s"`, resourceMetadataUrl)
 			w.Header().Set("WWW-Authenticate", wwwAuthValue)
 			handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
@@ -69,7 +69,7 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 		if tokenInfo.Props != nil {
 			decryptedProps, err := encryption.DecryptPropsIfNeeded(p.encryptionKey, tokenInfo.Props)
 			if err != nil {
-				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource/mcp", handlerutils.GetBaseURL(r))
+				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource", handlerutils.GetBaseURL(r))
 				wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Failed to decrypt token data", resource_metadata="%s"`, resourceMetadataUrl)
 				w.Header().Set("WWW-Authenticate", wwwAuthValue)
 				handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{

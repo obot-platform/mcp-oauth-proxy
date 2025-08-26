@@ -48,8 +48,8 @@ type OAuthProxy struct {
 }
 
 // LoadConfigFromEnv loads configuration from environment variables
-func LoadConfigFromEnv() *types.Config {
-	return &types.Config{
+func LoadConfigFromEnv() (*types.Config, error) {
+	config := &types.Config{
 		DatabaseDSN:       os.Getenv("DATABASE_DSN"),
 		OAuthClientID:     os.Getenv("OAUTH_CLIENT_ID"),
 		OAuthClientSecret: os.Getenv("OAUTH_CLIENT_SECRET"),
@@ -58,6 +58,14 @@ func LoadConfigFromEnv() *types.Config {
 		EncryptionKey:     os.Getenv("ENCRYPTION_KEY"),
 		MCPServerURL:      os.Getenv("MCP_SERVER_URL"),
 	}
+
+	if u, err := url.Parse(config.MCPServerURL); err != nil || u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("invalid MCP server URL: %w", err)
+	} else if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("MCP server URL must not contain a path, query, or fragment")
+	}
+
+	return config, nil
 }
 
 func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
@@ -194,22 +202,21 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	revokeHandler := revoke.NewHandler(p.db)
 	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey)
 
-	mux.HandleFunc("/health", p.withCORS(p.healthHandler))
+	mux.HandleFunc("GET /health", p.withCORS(p.healthHandler))
 
 	// OAuth endpoints
-	mux.HandleFunc("/authorize", p.withCORS(p.withRateLimit(authorizeHandler)))
-	mux.HandleFunc("/callback", p.withCORS(p.withRateLimit(callbackHandler)))
-	mux.HandleFunc("/token", p.withCORS(p.withRateLimit(tokenHandler)))
-	mux.HandleFunc("/revoke", p.withCORS(p.withRateLimit(revokeHandler)))
-	mux.HandleFunc("/register", p.withCORS(p.withRateLimit(register.NewHandler(p.db))))
+	mux.HandleFunc("GET /authorize", p.withCORS(p.withRateLimit(authorizeHandler)))
+	mux.HandleFunc("GET /callback", p.withCORS(p.withRateLimit(callbackHandler)))
+	mux.HandleFunc("POST /token", p.withCORS(p.withRateLimit(tokenHandler)))
+	mux.HandleFunc("POST /revoke", p.withCORS(p.withRateLimit(revokeHandler)))
+	mux.HandleFunc("POST /register", p.withCORS(p.withRateLimit(register.NewHandler(p.db))))
 
 	// Metadata endpoints
-	mux.HandleFunc("/.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
-	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", p.withCORS(p.protectedResourceMetadataHandler))
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", p.withCORS(p.protectedResourceMetadataHandler))
 
-	// Protected resource endpoints
-	mux.HandleFunc("/mcp", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
-	mux.HandleFunc("/mcp/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
+	// Protect everything else
+	mux.HandleFunc("/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
 }
 
 // GetHandler returns an http.Handler for the OAuth proxy
@@ -289,9 +296,10 @@ func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	baseURL := handlerutils.GetBaseURL(r)
 	metadata := types.OAuthProtectedResourceMetadata{
-		Resource:              fmt.Sprintf("%s/mcp", handlerutils.GetBaseURL(r)),
-		AuthorizationServers:  []string{handlerutils.GetBaseURL(r)},
+		Resource:              baseURL,
+		AuthorizationServers:  []string{baseURL},
 		Scopes:                p.metadata.ScopesSupported,
 		ResourceName:          p.resourceName,
 		ResourceDocumentation: p.metadata.ServiceDocumentation,
@@ -387,15 +395,7 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create target URL
-	var targetURL string
-	if path == "" {
-		// If no path is provided, use the MCP server URL directly
-		targetURL = p.GetMCPServerURL()
-	} else {
-		// If path is provided, append it to the MCP server URL
-		targetURL = p.GetMCPServerURL() + "/" + path
-	}
-
+	targetURL := p.GetMCPServerURL() + "/" + path
 	// Log the proxy request for debugging
 	log.Printf("Proxying request: %s %s -> %s", r.Method, r.URL.Path, targetURL)
 
@@ -404,12 +404,12 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 		Director: func(req *http.Request) {
 			req.Header.Del("Authorization")
 			req.Header.Set("X-Forwarded-Host", req.Host)
+			req.Header.Set("X-Forwarded-Proto", req.URL.Scheme)
 
 			newURL, _ := url.Parse(targetURL)
 			req.URL.Scheme = newURL.Scheme
 			req.URL.Host = newURL.Host
 			req.Host = newURL.Host
-			req.URL.Path = newURL.Path
 
 			// Add forwarded headers from token props
 			if tokenInfo.Props != nil {
@@ -426,6 +426,27 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 					req.Header.Set("X-Forwarded-Access-Token", accessToken)
 				}
 			}
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			// Rewrite Location header to use proxy host instead of downstream server host
+			if location := resp.Header.Get("Location"); location != "" {
+				if locationURL, err := url.Parse(location); err == nil {
+					// Get the original request to extract proxy host
+					proxyHost := resp.Request.Header.Get("X-Forwarded-Host")
+					if proxyHost != "" {
+						// Parse downstream server URL to get scheme
+						downstreamURL, _ := url.Parse(p.GetMCPServerURL())
+
+						// Only rewrite if the location points to the downstream server
+						if locationURL.Host == downstreamURL.Host {
+							locationURL.Scheme = resp.Request.URL.Scheme
+							locationURL.Host = proxyHost
+							resp.Header.Set("Location", locationURL.String())
+						}
+					}
+				}
+			}
+			return nil
 		},
 		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {
 			log.Printf("Proxy error: %v", err)
