@@ -387,13 +387,10 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create target URL
-	var targetURL string
-	if path == "" {
-		// If no path is provided, use the MCP server URL directly
-		targetURL = p.GetMCPServerURL()
-	} else {
+	targetURL := p.GetMCPServerURL()
+	if path != "" {
 		// If path is provided, append it to the MCP server URL
-		targetURL = p.GetMCPServerURL() + "/" + path
+		targetURL = strings.TrimSuffix(targetURL, "/") + "/" + path
 	}
 
 	// Log the proxy request for debugging
