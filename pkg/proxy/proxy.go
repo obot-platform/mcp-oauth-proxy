@@ -409,6 +409,7 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 			req.URL.Scheme = newURL.Scheme
 			req.URL.Host = newURL.Host
 			req.Host = newURL.Host
+			req.URL.Path = newURL.Path
 
 			// Add forwarded headers from token props
 			if tokenInfo.Props != nil {
