@@ -1,33 +1,13 @@
 package main
 
 import (
-	"log"
-	"net/http"
+	"os"
 
-	"github.com/obot-platform/mcp-oauth-proxy/pkg/proxy"
+	"github.com/obot-platform/mcp-oauth-proxy/cmd"
 )
 
 func main() {
-	// Load configuration from environment variables
-	config, err := proxy.LoadConfigFromEnv()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+	if err := cmd.Execute(); err != nil {
+		os.Exit(1)
 	}
-
-	proxy, err := proxy.NewOAuthProxy(config)
-	if err != nil {
-		log.Fatalf("Failed to create OAuth proxy: %v", err)
-	}
-	defer func() {
-		if err := proxy.Close(); err != nil {
-			log.Printf("Error closing database: %v", err)
-		}
-	}()
-
-	// Get HTTP handler
-	handler := proxy.GetHandler()
-
-	// Start server
-	log.Print("Starting OAuth proxy server on localhost:" + config.Port)
-	log.Fatal(http.ListenAndServe(":"+config.Port, handler))
 }

@@ -126,6 +126,11 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"code_challenge_method": authReq.CodeChallengeMethod,
 	}
 
+	// Add redirect parameter if present for post-auth redirect
+	if rd := params.Get("rd"); rd != "" {
+		authData["rd"] = rd
+	}
+
 	if err := p.db.StoreAuthRequest(stateKey, authData); err != nil {
 		handlerutils.JSON(w, http.StatusInternalServerError, types.OAuthError{
 			Error:            "server_error",

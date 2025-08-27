@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/proxy"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,7 +63,10 @@ func TestIntegrationFlow(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode: proxy.ModeProxy,
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -180,7 +184,10 @@ func TestOAuthProxyCreation(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode: proxy.ModeProxy,
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -233,7 +240,10 @@ func TestOAuthProxyStart(t *testing.T) {
 	}()
 
 	// Create OAuth proxy
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode: proxy.ModeProxy,
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -296,7 +306,7 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
 		"SCOPES_SUPPORTED":    "openid,profile,email",
 		"PROXY_MODE":          "forward_auth",
-		"PORT":                "8082", // Different port to avoid conflicts
+		"PORT":                "8082",                         // Different port to avoid conflicts
 		"DATABASE_DSN":        os.Getenv("TEST_DATABASE_DSN"), // Use test database if available
 	}
 
@@ -320,7 +330,10 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 	}()
 
 	// Create OAuth proxy in forward auth mode
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode: proxy.ModeForwardAuth,
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -375,7 +388,7 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 	// Test that forward auth mode requires authorization for protected endpoints
 	t.Run("ForwardAuthRequiresAuth", func(t *testing.T) {
 		testPaths := []string{"/api", "/data", "/protected", "/mcp", "/test"}
-		
+
 		for _, path := range testPaths {
 			t.Run("Path_"+path, func(t *testing.T) {
 				w := httptest.NewRecorder()
@@ -399,7 +412,7 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 		// Should get unauthorized (no proxying attempt)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Bearer")
-		
+
 		// Should not have any proxy-related error messages
 		assert.NotContains(t, w.Body.String(), "proxy")
 		assert.NotContains(t, w.Body.String(), "502")

@@ -52,7 +52,7 @@ func TestTokenManager(t *testing.T) {
 		tokenManager, err := NewTokenManager(mockDB)
 		require.NoError(t, err)
 
-		assert.Equal(t, mockDB, tokenManager.db)
+		assert.Equal(t, mockDB, tokenManager.DB)
 	})
 
 	t.Run("TestValidateAccessToken", func(t *testing.T) {
@@ -61,13 +61,13 @@ func TestTokenManager(t *testing.T) {
 		require.NoError(t, err)
 
 		// Test without database
-		tokenManager.db = nil
+		tokenManager.DB = nil
 		_, err = tokenManager.ValidateAccessToken("test_token")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "database not configured")
 
 		// Test with database but no token
-		tokenManager.db = mockDB
+		tokenManager.DB = mockDB
 		_, err = tokenManager.ValidateAccessToken("non_existent_token")
 		assert.Error(t, err)
 		// The error could be either "token not found" or "invalid token format" depending on the token format

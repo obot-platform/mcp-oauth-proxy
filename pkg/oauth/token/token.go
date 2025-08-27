@@ -216,7 +216,6 @@ func (p *Handler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Re
 
 	// Generate refresh token in format: userId:grantId:refreshTokenSecret
 	refreshTokenSecret := encryption.GenerateRandomString(32)
-
 	refreshToken := fmt.Sprintf("%s:%s:%s", userID, grantID, refreshTokenSecret)
 
 	// Store tokens in database
@@ -306,28 +305,26 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Props are stored in the grant and will be accessed when needed
-	// For simple string token generation, we don't need to decrypt them here
-
 	// Generate new access token in format: userId:grantId:accessTokenSecret
 	accessTokenSecret := encryption.GenerateRandomString(32)
 	accessToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, accessTokenSecret)
 
-	// Generate new refresh token in format: userId:grantId:refreshTokenSecret (OAuth 2.1 refresh token rotation)
+	// Generate new refresh token
 	refreshTokenSecret := encryption.GenerateRandomString(32)
-
-	newRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
+	refreshToken = fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
+	refreshTokenExpiresAt := time.Now().Add(30 * 24 * time.Hour) // 30 days from now
 
 	// Store new token in database (replaces the old one)
 	newTokenData := &types.TokenData{
-		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
-		ClientID:     clientID,
-		UserID:       tokenData.UserID,
-		GrantID:      tokenData.GrantID,
-		Scope:        tokenData.Scope,
-		ExpiresAt:    time.Now().Add(time.Duration(3600) * time.Second),
-		CreatedAt:    time.Now(),
+		AccessToken:           accessToken,
+		RefreshToken:          refreshToken,
+		ClientID:              clientID,
+		UserID:                tokenData.UserID,
+		GrantID:               tokenData.GrantID,
+		Scope:                 tokenData.Scope,
+		ExpiresAt:             time.Now().Add(time.Duration(3600) * time.Second),
+		RefreshTokenExpiresAt: refreshTokenExpiresAt,
+		CreatedAt:             time.Now(),
 	}
 
 	if err := p.db.StoreToken(newTokenData); err != nil {
@@ -339,17 +336,16 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Revoke the old token
-	if err := p.db.RevokeToken(tokenData.AccessToken); err != nil {
-		log.Printf("Failed to revoke old token: %v", err)
-		// Don't fail the request, but log the error
+	// Revoke the old refresh token
+	if err := p.db.RevokeToken(refreshToken); err != nil {
+		log.Printf("Failed to revoke old refresh token: %v", err)
 	}
 
 	response := types.TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
-		RefreshToken: newRefreshToken,
+		RefreshToken: refreshToken,
 		Scope:        tokenData.Scope,
 	}
 
