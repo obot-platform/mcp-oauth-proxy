@@ -295,14 +295,6 @@ func (d *Store) RevokeToken(token string) error {
 	return result.Error
 }
 
-// UpdateTokenRefreshToken updates the refresh token for an existing token
-func (d *Store) UpdateTokenRefreshToken(accessToken, newRefreshToken string) error {
-	hashedAccessToken := hashToken(accessToken)
-	hashedNewRefreshToken := hashToken(newRefreshToken)
-
-	return d.db.Model(&types.TokenData{}).Where("access_token = ?", hashedAccessToken).Update("refresh_token", hashedNewRefreshToken).Error
-}
-
 // CleanupExpiredTokens removes expired tokens and authorization codes
 func (d *Store) CleanupExpiredTokens() error {
 	now := time.Now()
