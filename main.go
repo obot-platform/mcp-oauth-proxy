@@ -28,6 +28,6 @@ func main() {
 	handler := proxy.GetHandler()
 
 	// Start server
-	log.Printf("Starting OAuth proxy server on localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	log.Printf("Starting OAuth proxy server on localhost:" + config.Port)
+	log.Fatal(http.ListenAndServe(":"+config.Port, handler))
 }

@@ -31,6 +31,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const (
+	ModeProxy       = "proxy"
+	ModeForwardAuth = "forward_auth"
+)
+
 type OAuthProxy struct {
 	metadata      *types.OAuthMetadata
 	db            *db.Store
@@ -57,12 +62,29 @@ func LoadConfigFromEnv() (*types.Config, error) {
 		ScopesSupported:   os.Getenv("SCOPES_SUPPORTED"),
 		EncryptionKey:     os.Getenv("ENCRYPTION_KEY"),
 		MCPServerURL:      os.Getenv("MCP_SERVER_URL"),
+		Mode:              os.Getenv("PROXY_MODE"),
+		Port:              os.Getenv("PORT"),
 	}
 
-	if u, err := url.Parse(config.MCPServerURL); err != nil || u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("invalid MCP server URL: %w", err)
-	} else if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("MCP server URL must not contain a path, query, or fragment")
+	if config.Port == "" {
+		config.Port = "8080"
+	}
+
+	switch config.Mode {
+	case "":
+		fmt.Println("Defaulting to proxy mode")
+		config.Mode = ModeProxy
+	case ModeProxy, ModeForwardAuth:
+	default:
+		return nil, fmt.Errorf("invalid mode: %s", config.Mode)
+	}
+
+	if config.Mode == ModeProxy {
+		if u, err := url.Parse(config.MCPServerURL); err != nil || u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("invalid MCP server URL: %w", err)
+		} else if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("MCP server URL must not contain a path, query, or fragment")
+		}
 	}
 
 	return config, nil
@@ -214,6 +236,7 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	// Metadata endpoints
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", p.withCORS(p.protectedResourceMetadataHandler))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/{path...}", p.withCORS(p.protectedResourceMetadataHandler))
 
 	// Protect everything else
 	mux.HandleFunc("/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
@@ -394,68 +417,83 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create target URL
-	targetURL := p.GetMCPServerURL() + "/" + path
-	// Log the proxy request for debugging
-	log.Printf("Proxying request: %s %s -> %s", r.Method, r.URL.Path, targetURL)
+	switch p.config.Mode {
+	case ModeForwardAuth:
+		setHeaders(w.Header(), tokenInfo.Props)
+	case ModeProxy:
+		// Create target URL
+		targetURL := p.GetMCPServerURL() + "/" + path
+		// Log the proxy request for debugging
+		log.Printf("Proxying request: %s %s -> %s", r.Method, r.URL.Path, targetURL)
 
-	// Create reverse proxy
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.Header.Del("Authorization")
-			req.Header.Set("X-Forwarded-Host", req.Host)
-			req.Header.Set("X-Forwarded-Proto", req.URL.Scheme)
+		// Create reverse proxy
+		proxy := &httputil.ReverseProxy{
+			Director: func(req *http.Request) {
+				req.Header.Del("Authorization")
+				req.Header.Set("X-Forwarded-Host", req.Host)
+				req.Header.Set("X-Forwarded-Proto", req.URL.Scheme)
 
-			newURL, _ := url.Parse(targetURL)
-			req.URL.Scheme = newURL.Scheme
-			req.URL.Host = newURL.Host
-			req.Host = newURL.Host
+				newURL, _ := url.Parse(targetURL)
+				req.URL.Scheme = newURL.Scheme
+				req.URL.Host = newURL.Host
+				req.Host = newURL.Host
 
-			// Add forwarded headers from token props
-			if tokenInfo.Props != nil {
-				if userID, ok := tokenInfo.Props["user_id"].(string); ok {
-					req.Header.Set("X-Forwarded-User", userID)
-				}
-				if email, ok := tokenInfo.Props["email"].(string); ok {
-					req.Header.Set("X-Forwarded-Email", email)
-				}
-				if name, ok := tokenInfo.Props["name"].(string); ok {
-					req.Header.Set("X-Forwarded-Name", name)
-				}
-				if accessToken, ok := tokenInfo.Props["access_token"].(string); ok {
-					req.Header.Set("X-Forwarded-Access-Token", accessToken)
-				}
-			}
-		},
-		ModifyResponse: func(resp *http.Response) error {
-			// Rewrite Location header to use proxy host instead of downstream server host
-			if location := resp.Header.Get("Location"); location != "" {
-				if locationURL, err := url.Parse(location); err == nil {
-					// Get the original request to extract proxy host
-					proxyHost := resp.Request.Header.Get("X-Forwarded-Host")
-					if proxyHost != "" {
-						// Parse downstream server URL to get scheme
-						downstreamURL, _ := url.Parse(p.GetMCPServerURL())
+				// Add forwarded headers from token props
+				setHeaders(req.Header, tokenInfo.Props)
+			},
+			ModifyResponse: func(resp *http.Response) error {
+				// Rewrite Location header to use proxy host instead of downstream server host
+				if location := resp.Header.Get("Location"); location != "" {
+					if locationURL, err := url.Parse(location); err == nil {
+						// Get the original request to extract proxy host
+						proxyHost := resp.Request.Header.Get("X-Forwarded-Host")
+						if proxyHost != "" {
+							// Parse downstream server URL to get scheme
+							downstreamURL, _ := url.Parse(p.GetMCPServerURL())
 
-						// Only rewrite if the location points to the downstream server
-						if locationURL.Host == downstreamURL.Host {
-							locationURL.Scheme = resp.Request.URL.Scheme
-							locationURL.Host = proxyHost
-							resp.Header.Set("Location", locationURL.String())
+							// Only rewrite if the location points to the downstream server
+							if locationURL.Host == downstreamURL.Host {
+								locationURL.Scheme = resp.Request.URL.Scheme
+								locationURL.Host = proxyHost
+								resp.Header.Set("Location", locationURL.String())
+							}
 						}
 					}
 				}
-			}
-			return nil
-		},
-		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {
-			log.Printf("Proxy error: %v", err)
-			rw.WriteHeader(http.StatusBadGateway)
-		},
-	}
+				return nil
+			},
+			ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {
+				log.Printf("Proxy error: %v", err)
+				rw.WriteHeader(http.StatusBadGateway)
+			},
+		}
 
-	// Serve the proxied request
-	proxy.ServeHTTP(w, r)
+		// Serve the proxied request
+		proxy.ServeHTTP(w, r)
+	}
+}
+
+func setHeaders(header http.Header, props map[string]any) {
+	if userID, ok := props["user_id"].(string); ok {
+		header.Set("X-Forwarded-User", userID)
+	} else {
+		header.Del("X-Forwarded-User")
+	}
+	if email, ok := props["email"].(string); ok {
+		header.Set("X-Forwarded-Email", email)
+	} else {
+		header.Del("X-Forwarded-Email")
+	}
+	if name, ok := props["name"].(string); ok {
+		header.Set("X-Forwarded-Name", name)
+	} else {
+		header.Del("X-Forwarded-Name")
+	}
+	if accessToken, ok := props["access_token"].(string); ok {
+		header.Set("X-Forwarded-Access-Token", accessToken)
+	} else {
+		header.Del("X-Forwarded-Access-Token")
+	}
 }
 
 // updateGrant updates a grant with new token information
