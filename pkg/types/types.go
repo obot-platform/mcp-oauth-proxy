@@ -6,6 +6,7 @@ import (
 
 // Config holds all configuration values for the OAuth proxy
 type Config struct {
+	Port              string
 	DatabaseDSN       string
 	OAuthClientID     string
 	OAuthClientSecret string
@@ -13,6 +14,7 @@ type Config struct {
 	ScopesSupported   string
 	EncryptionKey     string
 	MCPServerURL      string
+	Mode              string
 }
 
 // TokenData represents stored token data for OAuth 2.1 compliance

@@ -135,7 +135,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response["client_secret_expires_at"] = 0 // Never expires
 	}
 
-	handlerutils.JSON(w, http.StatusCreated, response)
+	handlerutils.JSON(w, http.StatusOK, response)
 }
 
 func (p *Handler) validateClientMetadata(metadata map[string]any) (*types.ClientInfo, error) {

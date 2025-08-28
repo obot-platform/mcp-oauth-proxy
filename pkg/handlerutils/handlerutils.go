@@ -20,7 +20,6 @@ func JSON(w http.ResponseWriter, statusCode int, obj any) {
 				"error_description": "Failed to encode JSON response",
 				"error_detail":      err.Error(),
 			})
-			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write(errText)
 		}
 	}
@@ -52,6 +51,10 @@ func GetClientIP(r *http.Request) string {
 // GetBaseURL returns the URL of the request without the path and
 // infers the scheme (http or https)
 func GetBaseURL(r *http.Request) string {
+	if url := r.Header.Get("X-Mcp-Oauth-Proxy-URL"); url != "" {
+		return url
+	}
+
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
