@@ -1,6 +1,6 @@
 module github.com/obot-platform/mcp-oauth-proxy
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/gorilla/handlers v1.5.2

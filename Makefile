@@ -36,7 +36,7 @@ test-coverage:
 
 # Linting
 lint:
-	golangci-lint run
+	golangci-lint run --tests=false
 
 # Build targets
 build:
