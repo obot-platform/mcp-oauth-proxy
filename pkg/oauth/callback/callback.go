@@ -10,6 +10,7 @@ import (
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/handlerutils"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/mcpui"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
@@ -19,6 +20,7 @@ type Store interface {
 	StoreAuthCode(code, grantID, userID string) error
 	GetAuthRequest(key string) (map[string]any, error)
 	DeleteAuthRequest(key string) error
+	StoreToken(token *types.TokenData) error
 }
 
 type Handler struct {
@@ -27,15 +29,22 @@ type Handler struct {
 	encryptionKey []byte
 	clientID      string
 	clientSecret  string
+	mcpUIManager  MCPUIManager
 }
 
-func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret string) http.Handler {
+// MCPUIManager interface for generating JWT tokens
+type MCPUIManager interface {
+	GenerateMCPUICodeForDownstream(bearerToken, refreshToken string) (string, error)
+}
+
+func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret string, mcpUIManager MCPUIManager) http.Handler {
 	return &Handler{
 		db:            db,
 		provider:      provider,
 		encryptionKey: encryptionKey,
 		clientID:      clientID,
 		clientSecret:  clientSecret,
+		mcpUIManager:  mcpUIManager,
 	}
 }
 
@@ -57,6 +66,34 @@ func getStringFromMap(data map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+// setMCPUISessionCookies sets secure HttpOnly session cookies for MCP UI authentication
+func (p *Handler) setMCPUISessionCookies(w http.ResponseWriter, r *http.Request, accessToken, refreshToken string) {
+	// Determine if request is secure
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
+	// Set access token cookie (1 hour)
+	http.SetCookie(w, &http.Cookie{
+		Name:     mcpui.MCPUICookieName,
+		Value:    accessToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   3600, // 1 hour
+	})
+
+	// Set refresh token cookie (30 days)
+	http.SetCookie(w, &http.Cookie{
+		Name:     mcpui.MCPUIRefreshCookieName,
+		Value:    refreshToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   30 * 24 * 3600, // 30 days
+	})
 }
 
 func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +254,49 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Error:            "server_error",
 			ErrorDescription: "Failed to store authorization code",
 		})
+		return
+	}
+
+	if rdValue := getStringFromMap(authData, "rd"); rdValue != "" {
+		// This is an MCP UI flow - you should be able to issue session cookies
+		log.Printf("🔄 Processing MCP UI OAuth callback")
+
+		// Generate internal application tokens (separate from OAuth provider tokens)
+		accessTokenSecret := encryption.GenerateRandomString(32)
+		accessToken := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, accessTokenSecret)
+
+		mcpUIRefreshTokenSecret := encryption.GenerateRandomString(32)
+		mcpUIRefreshToken := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, mcpUIRefreshTokenSecret)
+
+		// Store internal tokens in database
+		tokenData := &types.TokenData{
+			AccessToken:  accessToken,
+			RefreshToken: mcpUIRefreshToken,
+			ClientID:     authReq.ClientID,
+			UserID:       userInfo.ID,
+			GrantID:      grantID,
+			Scope:        authReq.Scope,
+			ExpiresAt:    time.Now().Add(1 * time.Hour), // 1 hour for access token
+			CreatedAt:    time.Now(),
+			Revoked:      false,
+		}
+
+		if err := p.db.StoreToken(tokenData); err != nil {
+			handlerutils.JSON(w, http.StatusInternalServerError, types.OAuthError{
+				Error:            "server_error",
+				ErrorDescription: "Failed to store tokens",
+			})
+			return
+		}
+
+		// Set secure HttpOnly session cookies
+		p.setMCPUISessionCookies(w, r, accessToken, mcpUIRefreshToken)
+
+		// Redirect to success page with original path as parameter
+		baseURL := handlerutils.GetBaseURL(r)
+		successURL := fmt.Sprintf("%s/auth/mcp-ui/success?rd=%s", baseURL, url.QueryEscape(rdValue))
+
+		http.Redirect(w, r, successURL, http.StatusFound)
 		return
 	}
 
