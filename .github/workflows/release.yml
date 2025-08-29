@@ -258,7 +258,7 @@ jobs:
             BUILD_TIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
 
   release:
-    needs: [build, build-macos, create-universal-macos, docker]
+    needs: [build-linux, build-macos, create-universal-macos, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
