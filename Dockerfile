@@ -15,8 +15,14 @@ RUN go mod tidy
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o oauth-proxy main.go
+# Accept build arguments
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
+
+# Build the application with version info
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+    -ldflags="-X main.version=${VERSION} -X main.buildTime=${BUILD_TIME} -s -w" \
+    -o oauth-proxy .
 
 # Final stage
 FROM alpine:latest
