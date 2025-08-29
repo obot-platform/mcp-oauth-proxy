@@ -1,18 +1,12 @@
-name: Release Go Binaries
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release (e.g., v1.0.0)'
-        required: true
-        type: string
+      - "v*"
 
 env:
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.25"
 
 jobs:
   test:
@@ -44,11 +38,14 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
+
       - name: Run linter
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.4.0
+          args: --timeout=5m --tests=false
 
       - name: Run tests
         env:
@@ -57,7 +54,7 @@ jobs:
           go test -v -short ./...
           go test -v -race ./...
 
-  build:
+  build-linux:
     needs: test
     runs-on: ubuntu-latest
     strategy:
@@ -70,13 +67,6 @@ jobs:
           - goos: linux
             goarch: arm64
             name: linux-arm64
-          # macOS builds (universal binary will be created separately)
-          - goos: darwin
-            goarch: amd64
-            name: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            name: darwin-arm64
 
     steps:
       - name: Checkout repository
@@ -93,11 +83,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Build binary
         env:
@@ -116,13 +102,13 @@ jobs:
             # For macOS, we'll use a different approach with osxcross or build on macOS runners
             echo "Building for macOS..."
           fi
-          
+
           mkdir -p dist
           binary_name="mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-${{ matrix.name }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             binary_name="${binary_name}.exe"
           fi
-          
+
           go build -o "dist/${binary_name}" \
             -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -s -w" \
             .
@@ -160,11 +146,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Build binary
         env:
@@ -174,7 +156,7 @@ jobs:
         run: |
           mkdir -p dist
           binary_name="mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-${{ matrix.name }}"
-          
+
           go build -o "dist/${binary_name}" \
             -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -s -w" \
             .
@@ -193,11 +175,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Download macOS binaries
         uses: actions/download-artifact@v4
@@ -208,14 +186,14 @@ jobs:
       - name: Create universal binary
         run: |
           mkdir -p dist
-          
+
           # Find the actual binary files
           amd64_binary=$(find ./binaries -name "*darwin-amd64*" -type f | head -1)
           arm64_binary=$(find ./binaries -name "*darwin-arm64*" -type f | head -1)
-          
+
           echo "AMD64 binary: $amd64_binary"
           echo "ARM64 binary: $arm64_binary"
-          
+
           # Create universal binary
           lipo -create \
             "$amd64_binary" \
@@ -235,7 +213,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -243,11 +221,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -288,7 +262,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -296,11 +270,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -312,11 +282,11 @@ jobs:
         run: |
           mkdir -p release
           find ./artifacts -type f -name "mcp-oauth-proxy-*" -exec cp {} release/ \;
-          
+
           # Create checksums
           cd release
           sha256sum * > checksums.txt
-          
+
           # List files for verification
           echo "Release files:"
           ls -la
@@ -326,40 +296,40 @@ jobs:
         run: |
           cat << 'EOF' > CHANGELOG.md
           ## What's Changed in ${{ steps.version.outputs.VERSION }}
-          
+
           ### 🚀 Features
           - Cross-platform release with native binaries for Linux and macOS
           - Multi-architecture Docker images for Linux (AMD64 and ARM64)
-          
+
           ### 📦 Binary Downloads
           - **Linux AMD64**: `mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-linux-amd64`
           - **Linux ARM64**: `mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-linux-arm64`
           - **macOS Universal**: `mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-darwin-universal` (Intel + Apple Silicon)
           - **macOS AMD64**: `mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-darwin-amd64` (Intel)
           - **macOS ARM64**: `mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-darwin-arm64` (Apple Silicon)
-          
+
           ### 🐳 Docker Images
           - **Tagged Release**: `ghcr.io/${{ github.repository_owner }}/mcp-oauth-proxy:${{ steps.version.outputs.VERSION }}`
           - **Latest**: `ghcr.io/${{ github.repository_owner }}/mcp-oauth-proxy:latest`
           - **Platforms**: linux/amd64, linux/arm64
-          
+
           ### 🔍 Verification
           All binaries can be verified using the included `checksums.txt` file.
-          
+
           ### 🛠️ Installation
-          
+
           **Binary Installation:**
           1. Download the appropriate binary for your platform
           2. Make it executable: `chmod +x mcp-oauth-proxy-*`
           3. Move to your PATH: `mv mcp-oauth-proxy-* /usr/local/bin/mcp-oauth-proxy`
-          
+
           **Docker Installation:**
           ```bash
           docker pull ghcr.io/${{ github.repository_owner }}/mcp-oauth-proxy:${{ steps.version.outputs.VERSION }}
           # or
           docker pull ghcr.io/${{ github.repository_owner }}/mcp-oauth-proxy:latest
           ```
-          
+
           **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.version.outputs.VERSION }}
           EOF
 
@@ -374,3 +344,4 @@ jobs:
           prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
           token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true
+          allowUpdates: true

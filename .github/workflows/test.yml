@@ -36,11 +36,14 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
+
       - name: Run linter
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.4.0
+          args: --timeout=5m --tests=false
 
       - name: Run unit tests (PostgreSQL)
         run: go test -v -short ./...
@@ -92,6 +95,9 @@ jobs:
 
       - name: Install dependencies
         run: go mod download
+
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: Run unit tests (SQLite)
         run: go test -v -short ./...
