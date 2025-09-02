@@ -104,7 +104,7 @@ jobs:
           fi
 
           mkdir -p dist
-          binary_name="mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-${{ matrix.name }}"
+          binary_name="mcp-oauth-proxy-${{ matrix.name }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             binary_name="${binary_name}.exe"
           fi
@@ -155,7 +155,7 @@ jobs:
           CGO_ENABLED: 1
         run: |
           mkdir -p dist
-          binary_name="mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-${{ matrix.name }}"
+          binary_name="mcp-oauth-proxy-${{ matrix.name }}"
 
           go build -o "dist/${binary_name}" \
             -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -s -w" \
@@ -198,7 +198,7 @@ jobs:
           lipo -create \
             "$amd64_binary" \
             "$arm64_binary" \
-            -output "dist/mcp-oauth-proxy-${{ steps.version.outputs.VERSION }}-darwin-universal"
+            -output "dist/mcp-oauth-proxy-darwin-universal"
 
       - name: Upload universal binary artifact
         uses: actions/upload-artifact@v4
