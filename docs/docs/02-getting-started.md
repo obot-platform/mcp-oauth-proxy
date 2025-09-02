@@ -208,10 +208,12 @@ You can now test your setup by using vscode MCP.
 - prompt to get the list of emails
 - you should see the list of emails
 
-## Troubleshooting
+## Example
 
-If you are facing any issues, you can check the logs of the proxy by running the following command:
+These are the example mcp servers that run with the proxy to integrate with external services.
 
-```bash
-docker logs mcp-oauth-proxy
-```
+- [Gmail MCP Server](https://github.com/obot-platform/tools/tree/main/google/gmail)
+- [Google Drive MCP Server](https://github.com/obot-platform/tools/tree/main/google/drive)
+- [Google Calendar MCP Server](https://github.com/obot-platform/tools/tree/main/google/calendar)
+- [Google Sheets MCP Server](https://github.com/obot-platform/tools/tree/main/google/sheets)
+- [Outlook MCP Server](https://github.com/obot-platform/tools/tree/main/microsoft365/outlook-mcp)
