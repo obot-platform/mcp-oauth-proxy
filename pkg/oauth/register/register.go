@@ -135,6 +135,13 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response["client_secret_expires_at"] = 0 // Never expires
 	}
 
+	// Drop empty values
+	for k, v := range response {
+		if v == "" || v == nil {
+			delete(response, k)
+		}
+	}
+
 	handlerutils.JSON(w, http.StatusOK, response)
 }
 
