@@ -15,6 +15,7 @@ type Config struct {
 	EncryptionKey     string
 	MCPServerURL      string
 	Mode              string
+	RoutePrefix       string
 }
 
 // TokenData represents stored token data for OAuth 2.1 compliance

@@ -10,7 +10,7 @@ import (
 
 // TokenManager handles token generation and validation
 type TokenManager struct {
-	db Database
+	DB Database
 }
 
 // Database interface for token operations
@@ -29,13 +29,13 @@ type TokenClaims struct {
 // NewTokenManager creates a new token manager
 func NewTokenManager(db Database) (*TokenManager, error) {
 	return &TokenManager{
-		db: db,
+		DB: db,
 	}, nil
 }
 
 // ValidateAccessToken validates and parses a simple string access token
 func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, error) {
-	if tm.db == nil {
+	if tm.DB == nil {
 		return nil, fmt.Errorf("database not configured for token validation")
 	}
 
@@ -49,7 +49,7 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 	grantID := parts[1]
 
 	// Get token data from database
-	tokenData, err := tm.db.GetToken(tokenString)
+	tokenData, err := tm.DB.GetToken(tokenString)
 	if err != nil {
 		return nil, fmt.Errorf("token not found: %w", err)
 	}
@@ -65,7 +65,7 @@ func (tm *TokenManager) ValidateAccessToken(tokenString string) (*TokenClaims, e
 	}
 
 	// Get the grant to access props
-	grant, err := tm.db.GetGrant(grantID, userID)
+	grant, err := tm.DB.GetGrant(grantID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("grant not found: %w", err)
 	}

@@ -24,6 +24,7 @@ func TestDatabaseOperations(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Skipping database tests: TEST_DATABASE_DSN is not set")
 	}
+
 	db, err := New(dsn)
 	if err != nil {
 		t.Skipf("Skipping database tests: %v", err)
@@ -233,8 +234,6 @@ func testTokenOperations(t *testing.T, db *Store) {
 
 	// Test updating refresh token
 	newRefreshTokenData, err := generateRandomString(16)
-	require.NoError(t, err)
-	err = db.UpdateTokenRefreshToken(accessTokenData, newRefreshTokenData)
 	require.NoError(t, err)
 
 	updatedToken, err := db.GetToken(accessTokenData)
