@@ -24,15 +24,17 @@ type Handler struct {
 	scopesSupported []string
 	clientID        string
 	clientSecret    string
+	routePrefix     string
 }
 
-func NewHandler(db AuthorizationStore, provider providers.Provider, scopesSupported []string, clientID, clientSecret string) http.Handler {
+func NewHandler(db AuthorizationStore, provider providers.Provider, scopesSupported []string, clientID, clientSecret, routePrefix string) http.Handler {
 	return &Handler{
 		db:              db,
 		provider:        provider,
 		scopesSupported: scopesSupported,
 		clientID:        clientID,
 		clientSecret:    clientSecret,
+		routePrefix:     routePrefix,
 	}
 }
 
@@ -139,7 +141,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI := fmt.Sprintf("%s/callback", handlerutils.GetBaseURL(r))
+	redirectURI := fmt.Sprintf("%s%s/callback", handlerutils.GetBaseURL(r), p.routePrefix)
 
 	// Generate authorization URL with the provider
 	authURL := p.provider.GetAuthorizationURL(

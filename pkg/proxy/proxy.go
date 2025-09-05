@@ -192,27 +192,30 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 		log.Fatalf("Failed to get provider: %v", err)
 	}
 
-	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported, p.GetOAuthClientID(), p.GetOAuthClientSecret())
+	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix)
 	tokenHandler := token.NewHandler(p.db)
-	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.mcpUIManager)
+	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.mcpUIManager)
 	revokeHandler := revoke.NewHandler(p.db)
 	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported)
 
-	mux.HandleFunc("GET /health", p.withCORS(p.healthHandler))
+	// Get route prefix from config
+	prefix := p.config.RoutePrefix
+
+	mux.HandleFunc("GET "+prefix+"/health", p.withCORS(p.healthHandler))
 
 	// OAuth endpoints
-	mux.HandleFunc("GET /authorize", p.withCORS(p.withRateLimit(authorizeHandler)))
-	mux.HandleFunc("GET /callback", p.withCORS(p.withRateLimit(callbackHandler)))
-	mux.HandleFunc("POST /token", p.withCORS(p.withRateLimit(tokenHandler)))
-	mux.HandleFunc("POST /revoke", p.withCORS(p.withRateLimit(revokeHandler)))
-	mux.HandleFunc("POST /register", p.withCORS(p.withRateLimit(register.NewHandler(p.db))))
+	mux.HandleFunc("GET "+prefix+"/authorize", p.withCORS(p.withRateLimit(authorizeHandler)))
+	mux.HandleFunc("GET "+prefix+"/callback", p.withCORS(p.withRateLimit(callbackHandler)))
+	mux.HandleFunc("POST "+prefix+"/token", p.withCORS(p.withRateLimit(tokenHandler)))
+	mux.HandleFunc("POST "+prefix+"/revoke", p.withCORS(p.withRateLimit(revokeHandler)))
+	mux.HandleFunc("POST "+prefix+"/register", p.withCORS(p.withRateLimit(register.NewHandler(p.db))))
 
 	// Metadata endpoints
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", p.withCORS(p.protectedResourceMetadataHandler))
 
 	// Protect everything else
-	mux.HandleFunc("/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
+	mux.HandleFunc(prefix+"/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
 }
 
 // GetHandler returns an http.Handler for the OAuth proxy
@@ -270,21 +273,22 @@ func (p *OAuthProxy) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	baseURL := handlerutils.GetBaseURL(r)
+	prefix := p.config.RoutePrefix
 
 	// Create dynamic metadata based on the request
 	metadata := &types.OAuthMetadata{
 		Issuer:                                   baseURL,
 		ServiceDocumentation:                     p.metadata.ServiceDocumentation,
-		AuthorizationEndpoint:                    fmt.Sprintf("%s/authorize", baseURL),
+		AuthorizationEndpoint:                    fmt.Sprintf("%s%s/authorize", baseURL, prefix),
 		ResponseTypesSupported:                   p.metadata.ResponseTypesSupported,
 		CodeChallengeMethodsSupported:            p.metadata.CodeChallengeMethodsSupported,
-		TokenEndpoint:                            fmt.Sprintf("%s/token", baseURL),
+		TokenEndpoint:                            fmt.Sprintf("%s%s/token", baseURL, prefix),
 		TokenEndpointAuthMethodsSupported:        p.metadata.TokenEndpointAuthMethodsSupported,
 		GrantTypesSupported:                      p.metadata.GrantTypesSupported,
 		ScopesSupported:                          p.metadata.ScopesSupported,
-		RevocationEndpoint:                       fmt.Sprintf("%s/revoke", baseURL),
+		RevocationEndpoint:                       fmt.Sprintf("%s%s/revoke", baseURL, prefix),
 		RevocationEndpointAuthMethodsSupported:   p.metadata.RevocationEndpointAuthMethodsSupported,
-		RegistrationEndpoint:                     fmt.Sprintf("%s/register", baseURL),
+		RegistrationEndpoint:                     fmt.Sprintf("%s%s/register", baseURL, prefix),
 		RegistrationEndpointAuthMethodsSupported: p.metadata.RegistrationEndpointAuthMethodsSupported,
 	}
 
@@ -293,9 +297,12 @@ func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request
 
 func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	baseURL := handlerutils.GetBaseURL(r)
+	prefix := p.config.RoutePrefix
+	resourceURL := baseURL + prefix
+
 	metadata := types.OAuthProtectedResourceMetadata{
-		Resource:              baseURL,
-		AuthorizationServers:  []string{baseURL},
+		Resource:              resourceURL,
+		AuthorizationServers:  []string{baseURL + prefix},
 		Scopes:                p.metadata.ScopesSupported,
 		ResourceName:          p.resourceName,
 		ResourceDocumentation: p.metadata.ServiceDocumentation,

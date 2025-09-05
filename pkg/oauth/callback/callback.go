@@ -30,6 +30,7 @@ type Handler struct {
 	clientID      string
 	clientSecret  string
 	mcpUIManager  MCPUIManager
+	routePrefix   string
 }
 
 // MCPUIManager interface for generating JWT tokens
@@ -37,7 +38,7 @@ type MCPUIManager interface {
 	GenerateMCPUICodeForDownstream(bearerToken, refreshToken string) (string, error)
 }
 
-func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret string, mcpUIManager MCPUIManager) http.Handler {
+func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret, routePrefix string, mcpUIManager MCPUIManager) http.Handler {
 	return &Handler{
 		db:            db,
 		provider:      provider,
@@ -45,6 +46,7 @@ func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, cli
 		clientID:      clientID,
 		clientSecret:  clientSecret,
 		mcpUIManager:  mcpUIManager,
+		routePrefix:   routePrefix,
 	}
 }
 
@@ -150,7 +152,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Get provider credentials
-	redirectURI := fmt.Sprintf("%s/callback", handlerutils.GetBaseURL(r))
+	redirectURI := fmt.Sprintf("%s%s/callback", handlerutils.GetBaseURL(r), p.routePrefix)
 
 	// Exchange code for tokens
 	tokenInfo, err := p.provider.ExchangeCodeForToken(r.Context(), code, p.clientID, p.clientSecret, redirectURI)

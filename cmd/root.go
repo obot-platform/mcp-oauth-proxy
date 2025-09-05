@@ -35,8 +35,9 @@ type RootCmd struct {
 	EncryptionKey string `name:"encryption-key" env:"ENCRYPTION_KEY" usage:"Base64-encoded 32-byte AES-256 key for encrypting sensitive data (optional)"`
 
 	// Server configuration
-	Port string `name:"port" env:"PORT" usage:"Port to run the server on" default:"8080"`
-	Host string `name:"host" env:"HOST" usage:"Host to bind the server to" default:"localhost"`
+	Port        string `name:"port" env:"PORT" usage:"Port to run the server on" default:"8080"`
+	Host        string `name:"host" env:"HOST" usage:"Host to bind the server to" default:"localhost"`
+	RoutePrefix string `name:"route-prefix" env:"ROUTE_PREFIX" usage:"Optional prefix for all routes (e.g., '/oauth2')"`
 
 	// Logging
 	Verbose bool `name:"verbose,v" usage:"Enable verbose logging"`
@@ -69,6 +70,7 @@ func (c *RootCmd) Run(cobraCmd *cobra.Command, args []string) error {
 		MCPServerURL:      c.MCPServerURL,
 		EncryptionKey:     c.EncryptionKey,
 		Mode:              c.Mode,
+		RoutePrefix:       c.RoutePrefix,
 	}
 
 	// Validate configuration
