@@ -175,24 +175,25 @@ func (p *GenericProvider) GetUserInfo(ctx context.Context, accessToken string) (
 		return nil, fmt.Errorf("failed to decode user info response: %w", err)
 	}
 
-	var userInfo *UserInfo
-	if p.metadata.UserinfoEndpoint == "https://api.github.com/user" {
-		userInfo = &UserInfo{
-			ID:    getString(userInfoResp, "login"),
-			Email: getString(userInfoResp, "email"),
-			Name:  getString(userInfoResp, "name"),
-		}
-	} else {
-		userInfo = &UserInfo{
-			ID:    getString(userInfoResp, "sub"),
-			Email: getString(userInfoResp, "email"),
-			Name:  getString(userInfoResp, "name"),
-		}
+	userInfo := &UserInfo{
+		ID:            getString(userInfoResp, "id"),
+		Sub:           getString(userInfoResp, "sub"),
+		Login:         getString(userInfoResp, "login"),
+		Email:         getString(userInfoResp, "email"),
+		EmailVerified: getBool(userInfoResp, "email_verified"),
+		Name:          getString(userInfoResp, "name"),
+		Picture:       getString(userInfoResp, "picture"),
+		GivenName:     getString(userInfoResp, "given_name"),
+		FamilyName:    getString(userInfoResp, "family_name"),
+		Locale:        getString(userInfoResp, "locale"),
 	}
 
-	// If sub is not available, try other common ID fields
 	if userInfo.ID == "" {
-		userInfo.ID = getString(userInfoResp, "id")
+		userInfo.ID = userInfo.Sub
+	}
+
+	if userInfo.ID == "" && p.metadata.UserinfoEndpoint == "https://api.github.com/user" {
+		userInfo.ID = userInfo.Login
 	}
 
 	return userInfo, nil
@@ -231,12 +232,13 @@ func (p *GenericProvider) GetName() string {
 	return "generic"
 }
 
+func getBool(m map[string]any, key string) bool {
+	b, _ := m[key].(bool)
+	return b
+}
+
 // Helper functions
 func getString(m map[string]any, key string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return ""
+	str, _ := m[key].(string)
+	return str
 }

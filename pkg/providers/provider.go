@@ -8,9 +8,16 @@ import (
 
 // UserInfo represents user information from OAuth provider
 type UserInfo struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID            string `json:"id"`
+	Sub           string `json:"sub"`
+	Login         string `json:"login"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	GivenName     string `json:"given_name"`
+	FamilyName    string `json:"family_name"`
+	Picture       string `json:"picture"`
+	Locale        string `json:"locale"`
 }
 
 // TokenInfo represents token information from OAuth provider
