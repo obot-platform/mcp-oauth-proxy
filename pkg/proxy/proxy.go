@@ -195,7 +195,7 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	tokenHandler := token.NewHandler(p.db)
 	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.mcpUIManager)
 	revokeHandler := revoke.NewHandler(p.db)
-	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported)
+	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported, p.config.RoutePrefix)
 	successHandler := success.NewHandler()
 
 	// Get route prefix from config

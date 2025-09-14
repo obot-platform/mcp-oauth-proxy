@@ -296,7 +296,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Redirect to success page with original path as parameter
 		baseURL := handlerutils.GetBaseURL(r)
-		successURL := fmt.Sprintf("%s/auth/mcp-ui/success?rd=%s", baseURL, url.QueryEscape(rdValue))
+		successURL := fmt.Sprintf("%s%s/auth/mcp-ui/success?rd=%s", baseURL, p.routePrefix, url.QueryEscape(rdValue))
 
 		http.Redirect(w, r, successURL, http.StatusFound)
 		return

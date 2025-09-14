@@ -27,6 +27,7 @@ type TokenValidator struct {
 	clientID        string             // OAuth client ID
 	clientSecret    string             // OAuth client secret
 	scopesSupported []string           // Supported OAuth scopes
+	routePrefix     string
 }
 
 // TokenStore interface for database operations needed by validator
@@ -38,7 +39,7 @@ type TokenStore interface {
 	StoreAuthRequest(key string, data map[string]any) error
 }
 
-func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Manager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string) *TokenValidator {
+func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Manager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string, routePrefix string) *TokenValidator {
 	return &TokenValidator{
 		mcpUIManager:    mcpUIManager,
 		tokenManager:    tokenManager,
@@ -48,6 +49,7 @@ func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Ma
 		clientID:        clientID,
 		clientSecret:    clientSecret,
 		scopesSupported: scopesSupported,
+		routePrefix:     routePrefix,
 	}
 }
 
@@ -135,7 +137,7 @@ func (p *TokenValidator) rotateMCPUITokens(w http.ResponseWriter, r *http.Reques
 
 	// Revoke old access token
 	if err := p.db.RevokeToken(tokenData.AccessToken); err != nil {
-		log.Printf("❌ Failed to revoke old access token: %v", err)
+		log.Printf("Failed to revoke old access token: %v", err)
 	}
 
 	// Set cookies with new tokens
@@ -144,7 +146,7 @@ func (p *TokenValidator) rotateMCPUITokens(w http.ResponseWriter, r *http.Reques
 	// Validate the new access token and return token info
 	newTokenInfo, err := p.tokenManager.GetTokenInfo(newAccessToken)
 	if err != nil {
-		log.Printf("❌ Failed to validate newly created access token: %v", err)
+		log.Printf("Failed to validate newly created access token: %v", err)
 		return nil, "", false
 	}
 
@@ -339,7 +341,7 @@ func (p *TokenValidator) handleOauthFlow(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Build the authorization URL directly to OAuth provider (not our /authorize)
-	redirectURI := fmt.Sprintf("%s/callback", handlerutils.GetBaseURL(r))
+	redirectURI := fmt.Sprintf("%s%s/callback", handlerutils.GetBaseURL(r), p.routePrefix)
 	scope := strings.Join(p.scopesSupported, " ")
 
 	// Generate authorization URL with PKCE
@@ -350,13 +352,6 @@ func (p *TokenValidator) handleOauthFlow(w http.ResponseWriter, r *http.Request)
 
 func GetTokenInfo(r *http.Request) *tokens.TokenInfo {
 	return r.Context().Value(tokenInfoKey{}).(*tokens.TokenInfo)
-}
-
-func GetBearerToken(r *http.Request) string {
-	if token := r.Context().Value(bearerTokenKey{}); token != nil {
-		return token.(string)
-	}
-	return ""
 }
 
 type tokenInfoKey struct{}
