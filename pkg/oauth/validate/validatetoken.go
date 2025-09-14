@@ -21,7 +21,7 @@ import (
 type TokenValidator struct {
 	tokenManager    *tokens.TokenManager
 	encryptionKey   []byte
-	mcpUIManager    MCPUIManager       // Optional MCP UI manager for JWT handling
+	mcpUIManager    *mcpui.Manager     // Optional MCP UI manager for JWT handling
 	db              TokenStore         // Database for refresh operations
 	provider        providers.Provider // OAuth provider for generating auth URLs
 	clientID        string             // OAuth client ID
@@ -38,13 +38,9 @@ type TokenStore interface {
 	StoreAuthRequest(key string, data map[string]any) error
 }
 
-// MCPUIManager interface for JWT handling
-type MCPUIManager interface {
-	HandleMCPUIRequest(w http.ResponseWriter, r *http.Request) (string, bool)
-}
-
-func NewTokenValidator(tokenManager *tokens.TokenManager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string) *TokenValidator {
+func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Manager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string) *TokenValidator {
 	return &TokenValidator{
+		mcpUIManager:    mcpUIManager,
 		tokenManager:    tokenManager,
 		encryptionKey:   encryptionKey,
 		db:              db,
@@ -53,10 +49,6 @@ func NewTokenValidator(tokenManager *tokens.TokenManager, encryptionKey []byte, 
 		clientSecret:    clientSecret,
 		scopesSupported: scopesSupported,
 	}
-}
-
-func (p *TokenValidator) SetMCPUIManager(manager MCPUIManager) {
-	p.mcpUIManager = manager
 }
 
 func (p *TokenValidator) SetOAuthConfig(provider providers.Provider, clientID, clientSecret string, scopesSupported []string) {

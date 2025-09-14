@@ -23,6 +23,7 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/callback"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/register"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/revoke"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/success"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/token"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/validate"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
@@ -184,8 +185,6 @@ func (p *OAuthProxy) Start(ctx context.Context) error {
 	return nil
 }
 
-// getBaseURL returns the base URL from the request
-
 func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	provider, err := p.providers.GetProvider(p.provider)
 	if err != nil {
@@ -196,7 +195,8 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	tokenHandler := token.NewHandler(p.db)
 	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.mcpUIManager)
 	revokeHandler := revoke.NewHandler(p.db)
-	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported)
+	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported)
+	successHandler := success.NewHandler()
 
 	// Get route prefix from config
 	prefix := p.config.RoutePrefix
@@ -213,6 +213,8 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	// Metadata endpoints
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", p.withCORS(p.protectedResourceMetadataHandler))
+
+	mux.HandleFunc("GET "+prefix+"/auth/mcp-ui/success", p.withCORS(p.withRateLimit(successHandler)))
 
 	// Protect everything else
 	mux.HandleFunc(prefix+"/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
