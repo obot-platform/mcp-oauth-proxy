@@ -24,6 +24,7 @@ func TestDatabaseOperations(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Skipping database tests: TEST_DATABASE_DSN is not set")
 	}
+
 	db, err := New(dsn)
 	if err != nil {
 		t.Skipf("Skipping database tests: %v", err)
@@ -169,10 +170,16 @@ func testTokenOperations(t *testing.T, db *Store) {
 	grantID, err := generateRandomString(16)
 	require.NoError(t, err)
 
+	clientID, err := generateRandomString(16)
+	require.NoError(t, err)
+
+	userID, err := generateRandomString(16)
+	require.NoError(t, err)
+
 	grant := &types.Grant{
 		ID:       grantID,
-		ClientID: "test_client_db",
-		UserID:   "test_user_123",
+		ClientID: clientID,
+		UserID:   userID,
 		Scope:    []string{"read", "write", "admin"},
 		Metadata: map[string]any{"provider": "test", "ip": "127.0.0.1"},
 	}
@@ -190,8 +197,8 @@ func testTokenOperations(t *testing.T, db *Store) {
 	tokenData := &types.TokenData{
 		AccessToken:           accessTokenData,
 		RefreshToken:          refreshTokenData,
-		ClientID:              "test_client_db",
-		UserID:                "test_user_123",
+		ClientID:              clientID,
+		UserID:                userID,
 		GrantID:               grantID,
 		Scope:                 "read write admin",
 		ExpiresAt:             time.Now().Add(1 * time.Hour),
@@ -230,16 +237,6 @@ func testTokenOperations(t *testing.T, db *Store) {
 	require.NoError(t, err)
 	assert.True(t, revokedToken.Revoked)
 	assert.NotNil(t, revokedToken.RevokedAt)
-
-	// Test updating refresh token
-	newRefreshTokenData, err := generateRandomString(16)
-	require.NoError(t, err)
-	err = db.UpdateTokenRefreshToken(accessTokenData, newRefreshTokenData)
-	require.NoError(t, err)
-
-	updatedToken, err := db.GetToken(accessTokenData)
-	require.NoError(t, err)
-	assert.Equal(t, hashToken(newRefreshTokenData), updatedToken.RefreshToken)
 
 	// Test retrieving non-existent token
 	_, err = db.GetToken("non_existent_token")

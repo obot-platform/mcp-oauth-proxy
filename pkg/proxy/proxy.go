@@ -18,10 +18,12 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/db"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/handlerutils"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/mcpui"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/authorize"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/callback"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/register"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/revoke"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/success"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/token"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/validate"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
@@ -31,12 +33,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const (
-	ModeProxy       = "proxy"
-	ModeForwardAuth = "forward_auth"
-)
-
 type OAuthProxy struct {
+	mcpUIManager  *mcpui.Manager
 	metadata      *types.OAuthMetadata
 	db            *db.Store
 	rateLimiter   *ratelimit.RateLimiter
@@ -52,18 +50,21 @@ type OAuthProxy struct {
 	cancel context.CancelFunc
 }
 
-// LoadConfigFromEnv loads configuration from environment variables
-func LoadConfigFromEnv() (*types.Config, error) {
-	config := &types.Config{
-		DatabaseDSN:       os.Getenv("DATABASE_DSN"),
-		OAuthClientID:     os.Getenv("OAUTH_CLIENT_ID"),
-		OAuthClientSecret: os.Getenv("OAUTH_CLIENT_SECRET"),
-		OAuthAuthorizeURL: os.Getenv("OAUTH_AUTHORIZE_URL"),
-		ScopesSupported:   os.Getenv("SCOPES_SUPPORTED"),
-		EncryptionKey:     os.Getenv("ENCRYPTION_KEY"),
-		MCPServerURL:      os.Getenv("MCP_SERVER_URL"),
-		Mode:              os.Getenv("PROXY_MODE"),
-		Port:              os.Getenv("PORT"),
+const (
+	ModeProxy       = "proxy"
+	ModeForwardAuth = "forward_auth"
+)
+
+func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
+	databaseDSN := config.DatabaseDSN
+
+	// Log database configuration
+	if databaseDSN == "" {
+		log.Println("DATABASE_DSN not set, using SQLite database at data/oauth_proxy.db")
+	} else if strings.HasPrefix(databaseDSN, "postgres://") || strings.HasPrefix(databaseDSN, "postgresql://") {
+		log.Println("Using PostgreSQL database")
+	} else {
+		log.Printf("Using SQLite database at: %s", databaseDSN)
 	}
 
 	if config.Port == "" {
@@ -85,21 +86,6 @@ func LoadConfigFromEnv() (*types.Config, error) {
 		} else if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
 			return nil, fmt.Errorf("MCP server URL must not contain a path, query, or fragment")
 		}
-	}
-
-	return config, nil
-}
-
-func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
-	databaseDSN := config.DatabaseDSN
-
-	// Log database configuration
-	if databaseDSN == "" {
-		log.Println("DATABASE_DSN not set, using SQLite database at data/oauth_proxy.db")
-	} else if strings.HasPrefix(databaseDSN, "postgres://") || strings.HasPrefix(databaseDSN, "postgresql://") {
-		log.Println("Using PostgreSQL database")
-	} else {
-		log.Printf("Using SQLite database at: %s", databaseDSN)
 	}
 
 	// Initialize database
@@ -131,6 +117,20 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 		return nil, fmt.Errorf("failed to initialize token manager: %w", err)
 	}
 
+	encryptionKey, err := base64.StdEncoding.DecodeString(config.EncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode encryption key: %w", err)
+	}
+	mcpUIManager := mcpui.NewManager(
+		encryptionKey, // Use encryption key for JWE encryption
+		tokenManager,
+		providerManager,
+		provider,
+		config.OAuthClientID,
+		config.OAuthClientSecret,
+		db, // Add database for refresh token operations
+	)
+
 	// Split and trim scopes to handle whitespace
 	scopesSupported := ParseScopesSupported(config.ScopesSupported)
 
@@ -144,12 +144,8 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 		RegistrationEndpointAuthMethodsSupported: []string{"client_secret_post"},
 	}
 
-	encryptionKey, err := base64.StdEncoding.DecodeString(config.EncryptionKey)
-	if err != nil {
-		log.Fatalf("Failed to decode encryption key: %v", err)
-	}
-
 	return &OAuthProxy{
+		mcpUIManager:  mcpUIManager,
 		metadata:      metadata,
 		db:            db,
 		rateLimiter:   rateLimiter,
@@ -210,36 +206,40 @@ func (p *OAuthProxy) Start(ctx context.Context) error {
 	return nil
 }
 
-// getBaseURL returns the base URL from the request
-
 func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	provider, err := p.providers.GetProvider(p.provider)
 	if err != nil {
 		log.Fatalf("Failed to get provider: %v", err)
 	}
 
-	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported, p.GetOAuthClientID(), p.GetOAuthClientSecret())
+	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix)
 	tokenHandler := token.NewHandler(p.db)
-	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret())
+	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.mcpUIManager)
 	revokeHandler := revoke.NewHandler(p.db)
-	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey)
+	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported, p.config.RoutePrefix)
+	successHandler := success.NewHandler()
 
-	mux.HandleFunc("GET /health", p.withCORS(p.healthHandler))
+	// Get route prefix from config
+	prefix := p.config.RoutePrefix
+
+	mux.HandleFunc("GET "+prefix+"/health", p.withCORS(p.healthHandler))
 
 	// OAuth endpoints
-	mux.HandleFunc("GET /authorize", p.withCORS(p.withRateLimit(authorizeHandler)))
-	mux.HandleFunc("GET /callback", p.withCORS(p.withRateLimit(callbackHandler)))
-	mux.HandleFunc("POST /token", p.withCORS(p.withRateLimit(tokenHandler)))
-	mux.HandleFunc("POST /revoke", p.withCORS(p.withRateLimit(revokeHandler)))
-	mux.HandleFunc("POST /register", p.withCORS(p.withRateLimit(register.NewHandler(p.db))))
+	mux.HandleFunc("GET "+prefix+"/authorize", p.withCORS(p.withRateLimit(authorizeHandler)))
+	mux.HandleFunc("GET "+prefix+"/callback", p.withCORS(p.withRateLimit(callbackHandler)))
+	mux.HandleFunc("POST "+prefix+"/token", p.withCORS(p.withRateLimit(tokenHandler)))
+	mux.HandleFunc("POST "+prefix+"/revoke", p.withCORS(p.withRateLimit(revokeHandler)))
+	mux.HandleFunc("POST "+prefix+"/register", p.withCORS(p.withRateLimit(register.NewHandler(p.db))))
 
 	// Metadata endpoints
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", p.withCORS(p.protectedResourceMetadataHandler))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/{path...}", p.withCORS(p.protectedResourceMetadataHandler))
 
+	mux.HandleFunc("GET "+prefix+"/auth/mcp-ui/success", p.withCORS(p.withRateLimit(successHandler)))
+
 	// Protect everything else
-	mux.HandleFunc("/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
+	mux.HandleFunc(prefix+"/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
 }
 
 // GetHandler returns an http.Handler for the OAuth proxy
@@ -297,21 +297,22 @@ func (p *OAuthProxy) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	baseURL := handlerutils.GetBaseURL(r)
+	prefix := p.config.RoutePrefix
 
 	// Create dynamic metadata based on the request
 	metadata := &types.OAuthMetadata{
 		Issuer:                                   baseURL,
 		ServiceDocumentation:                     p.metadata.ServiceDocumentation,
-		AuthorizationEndpoint:                    fmt.Sprintf("%s/authorize", baseURL),
+		AuthorizationEndpoint:                    fmt.Sprintf("%s%s/authorize", baseURL, prefix),
 		ResponseTypesSupported:                   p.metadata.ResponseTypesSupported,
 		CodeChallengeMethodsSupported:            p.metadata.CodeChallengeMethodsSupported,
-		TokenEndpoint:                            fmt.Sprintf("%s/token", baseURL),
+		TokenEndpoint:                            fmt.Sprintf("%s%s/token", baseURL, prefix),
 		TokenEndpointAuthMethodsSupported:        p.metadata.TokenEndpointAuthMethodsSupported,
 		GrantTypesSupported:                      p.metadata.GrantTypesSupported,
 		ScopesSupported:                          p.metadata.ScopesSupported,
-		RevocationEndpoint:                       fmt.Sprintf("%s/revoke", baseURL),
+		RevocationEndpoint:                       fmt.Sprintf("%s%s/revoke", baseURL, prefix),
 		RevocationEndpointAuthMethodsSupported:   p.metadata.RevocationEndpointAuthMethodsSupported,
-		RegistrationEndpoint:                     fmt.Sprintf("%s/register", baseURL),
+		RegistrationEndpoint:                     fmt.Sprintf("%s%s/register", baseURL, prefix),
 		RegistrationEndpointAuthMethodsSupported: p.metadata.RegistrationEndpointAuthMethodsSupported,
 	}
 
@@ -320,9 +321,12 @@ func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request
 
 func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	baseURL := handlerutils.GetBaseURL(r)
+	prefix := p.config.RoutePrefix
+	resourceURL := baseURL + prefix
+
 	metadata := types.OAuthProtectedResourceMetadata{
-		Resource:              baseURL,
-		AuthorizationServers:  []string{baseURL},
+		Resource:              resourceURL,
+		AuthorizationServers:  []string{baseURL + prefix},
 		Scopes:                p.metadata.ScopesSupported,
 		ResourceName:          p.resourceName,
 		ResourceDocumentation: p.metadata.ServiceDocumentation,

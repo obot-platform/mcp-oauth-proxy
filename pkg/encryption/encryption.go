@@ -143,3 +143,69 @@ func DecryptPropsIfNeeded(encryptionKey []byte, props map[string]any) (map[strin
 
 	return result, nil
 }
+
+// EncryptString encrypts a string using AES-256-GCM
+func EncryptString(encryptionKey []byte, plaintext string) (string, error) {
+	// Create AES cipher
+	block, err := aes.NewCipher(encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate random IV
+	iv := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(iv); err != nil {
+		return "", fmt.Errorf("failed to generate IV: %w", err)
+	}
+
+	// Encrypt the data
+	ciphertext := gcm.Seal(nil, iv, []byte(plaintext), nil)
+
+	// Combine IV and ciphertext, then base64 encode
+	combined := append(iv, ciphertext...)
+	return base64.StdEncoding.EncodeToString(combined), nil
+}
+
+// DecryptString decrypts a string using AES-256-GCM
+func DecryptString(encryptionKey []byte, encryptedData string) (string, error) {
+	// Decode base64 data
+	combined, err := base64.StdEncoding.DecodeString(encryptedData)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode encrypted data: %w", err)
+	}
+
+	// Create AES cipher
+	block, err := aes.NewCipher(encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Extract IV and ciphertext
+	ivSize := gcm.NonceSize()
+	if len(combined) < ivSize {
+		return "", fmt.Errorf("encrypted data too short")
+	}
+
+	iv := combined[:ivSize]
+	ciphertext := combined[ivSize:]
+
+	// Decrypt the data
+	plaintext, err := gcm.Open(nil, iv, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt data: %w", err)
+	}
+
+	return string(plaintext), nil
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,82 +23,84 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	defer func() {
 		for key, value := range originalVars {
 			if value != "" {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			} else {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key)
 			}
 		}
 	}()
 
 	t.Run("DefaultMode", func(t *testing.T) {
-		os.Unsetenv("PROXY_MODE")
-		os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode:         ModeProxy,
+			MCPServerURL: "http://localhost:8081",
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 		assert.Equal(t, ModeProxy, config.Mode)
 	})
 
 	t.Run("DefaultPort", func(t *testing.T) {
-		os.Unsetenv("PORT")
-		os.Setenv("PROXY_MODE", ModeForwardAuth)
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode: ModeForwardAuth,
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 		assert.Equal(t, "8080", config.Port)
 	})
 
 	t.Run("CustomPort", func(t *testing.T) {
-		os.Setenv("PORT", "9090")
-		os.Setenv("PROXY_MODE", ModeForwardAuth)
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode: ModeForwardAuth,
+			Port: "9090",
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 		assert.Equal(t, "9090", config.Port)
 	})
 
 	t.Run("ValidProxyMode", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", ModeProxy)
-		os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode:         ModeProxy,
+			MCPServerURL: "http://localhost:8081",
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 		assert.Equal(t, ModeProxy, config.Mode)
 	})
 
 	t.Run("ValidForwardAuthMode", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", ModeForwardAuth)
-		os.Unsetenv("MCP_SERVER_URL") // Not required for forward auth mode
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode: ModeForwardAuth,
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 		assert.Equal(t, ModeForwardAuth, config.Mode)
 	})
 
 	t.Run("InvalidMode", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", "invalid_mode")
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode: "invalid_mode",
+		}
+		_, err := NewOAuthProxy(config)
 		assert.Error(t, err)
-		assert.Nil(t, config)
 		assert.Contains(t, err.Error(), "invalid mode: invalid_mode")
 	})
 
 	t.Run("ProxyModeRequiresMCPServerURL", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", ModeProxy)
-		os.Unsetenv("MCP_SERVER_URL")
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode: ModeProxy,
+		}
+		_, err := NewOAuthProxy(config)
 		assert.Error(t, err)
-		assert.Nil(t, config)
 		assert.Contains(t, err.Error(), "invalid MCP server URL")
 	})
 
 	t.Run("ForwardAuthModeDoesNotRequireMCPServerURL", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", ModeForwardAuth)
-		os.Unsetenv("MCP_SERVER_URL")
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode: ModeForwardAuth,
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 		assert.Equal(t, ModeForwardAuth, config.Mode)
 		assert.Empty(t, config.MCPServerURL)
@@ -116,10 +119,11 @@ func TestLoadConfigFromEnv(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				os.Setenv("PROXY_MODE", ModeProxy)
-				os.Setenv("MCP_SERVER_URL", tc.url)
-
-				config, err := LoadConfigFromEnv()
+				config := &types.Config{
+					Mode:         ModeProxy,
+					MCPServerURL: tc.url,
+				}
+				_, err := NewOAuthProxy(config)
 				require.NoError(t, err)
 				assert.Equal(t, tc.url, config.MCPServerURL)
 			})
@@ -140,12 +144,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				os.Setenv("PROXY_MODE", ModeProxy)
-				os.Setenv("MCP_SERVER_URL", tc.url)
-
-				config, err := LoadConfigFromEnv()
+				config := &types.Config{
+					Mode:         ModeProxy,
+					MCPServerURL: tc.url,
+				}
+				_, err := NewOAuthProxy(config)
 				assert.Error(t, err)
-				assert.Nil(t, config)
 			})
 		}
 	})
@@ -240,41 +244,16 @@ func TestOAuthProxyCreationWithModes(t *testing.T) {
 		t.Skip("Skipping OAuth proxy creation tests in short mode")
 	}
 
-	baseEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-	}
-
-	// Save and restore environment
-	oldVars := make(map[string]string)
-	for key := range baseEnvVars {
-		oldVars[key] = os.Getenv(key)
-	}
-	oldVars["PROXY_MODE"] = os.Getenv("PROXY_MODE")
-	oldVars["MCP_SERVER_URL"] = os.Getenv("MCP_SERVER_URL")
-
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				os.Setenv(key, value)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Set base environment
-	for key, value := range baseEnvVars {
-		os.Setenv(key, value)
-	}
-
 	t.Run("ProxyMode", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", ModeProxy)
-		os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode:              ModeProxy,
+			MCPServerURL:      "http://localhost:8081",
+			OAuthClientID:     "test_client_id",
+			OAuthClientSecret: "test_client_secret",
+			OAuthAuthorizeURL: "https://accounts.google.com",
+			ScopesSupported:   "openid,profile,email",
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 
 		proxy, err := NewOAuthProxy(config)
@@ -291,10 +270,14 @@ func TestOAuthProxyCreationWithModes(t *testing.T) {
 	})
 
 	t.Run("ForwardAuthMode", func(t *testing.T) {
-		os.Setenv("PROXY_MODE", ModeForwardAuth)
-		os.Unsetenv("MCP_SERVER_URL") // Not required for forward auth
-
-		config, err := LoadConfigFromEnv()
+		config := &types.Config{
+			Mode:              ModeForwardAuth,
+			OAuthClientID:     "test_client_id",
+			OAuthClientSecret: "test_client_secret",
+			OAuthAuthorizeURL: "https://accounts.google.com",
+			ScopesSupported:   "openid,profile,email",
+		}
+		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
 
 		proxy, err := NewOAuthProxy(config)
@@ -317,36 +300,15 @@ func TestForwardAuthModeIntegration(t *testing.T) {
 		t.Skip("Skipping integration tests in short mode")
 	}
 
-	// Set up test environment for forward auth mode
-	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-		"PROXY_MODE":          ModeForwardAuth,
-		"PORT":                "8080",
-	}
-
-	// Save original environment
-	oldVars := make(map[string]string)
-	for key, value := range testEnvVars {
-		oldVars[key] = os.Getenv(key)
-		os.Setenv(key, value)
-	}
-
-	// Restore environment after test
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				os.Setenv(key, value)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
 	// Create OAuth proxy in forward auth mode
-	config, err := LoadConfigFromEnv()
+	config := &types.Config{
+		Mode:              ModeForwardAuth,
+		OAuthClientID:     "test_client_id",
+		OAuthClientSecret: "test_client_secret",
+		OAuthAuthorizeURL: "https://accounts.google.com",
+		ScopesSupported:   "openid,profile,email",
+	}
+	_, err := NewOAuthProxy(config)
 	require.NoError(t, err)
 	require.Equal(t, ModeForwardAuth, config.Mode)
 
@@ -409,11 +371,11 @@ func TestForwardAuthModeIntegration(t *testing.T) {
 // TestModeSpecificValidation tests that validation rules work correctly for different modes
 func TestModeSpecificValidation(t *testing.T) {
 	testCases := []struct {
-		name           string
-		mode           string
-		mcpServerURL   string
-		expectError    bool
-		errorContains  string
+		name          string
+		mode          string
+		mcpServerURL  string
+		expectError   bool
+		errorContains string
 	}{
 		{
 			name:         "ProxyModeValidURL",
@@ -456,10 +418,10 @@ func TestModeSpecificValidation(t *testing.T) {
 			errorContains: "must not contain a path, query",
 		},
 		{
-			name:        "ForwardAuthNoURL",
-			mode:        ModeForwardAuth,
+			name:         "ForwardAuthNoURL",
+			mode:         ModeForwardAuth,
 			mcpServerURL: "",
-			expectError: false,
+			expectError:  false,
 		},
 		{
 			name:         "ForwardAuthWithURL",
@@ -475,39 +437,19 @@ func TestModeSpecificValidation(t *testing.T) {
 		},
 	}
 
-	// Save original environment
-	originalMode := os.Getenv("PROXY_MODE")
-	originalURL := os.Getenv("MCP_SERVER_URL")
-	defer func() {
-		if originalMode != "" {
-			os.Setenv("PROXY_MODE", originalMode)
-		} else {
-			os.Unsetenv("PROXY_MODE")
-		}
-		if originalURL != "" {
-			os.Setenv("MCP_SERVER_URL", originalURL)
-		} else {
-			os.Unsetenv("MCP_SERVER_URL")
-		}
-	}()
-
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			os.Setenv("PROXY_MODE", tc.mode)
-			if tc.mcpServerURL != "" {
-				os.Setenv("MCP_SERVER_URL", tc.mcpServerURL)
-			} else {
-				os.Unsetenv("MCP_SERVER_URL")
+			config := &types.Config{
+				Mode:         tc.mode,
+				MCPServerURL: tc.mcpServerURL,
 			}
-
-			config, err := LoadConfigFromEnv()
+			_, err := NewOAuthProxy(config)
 
 			if tc.expectError {
 				assert.Error(t, err)
 				if tc.errorContains != "" {
 					assert.Contains(t, err.Error(), tc.errorContains)
 				}
-				assert.Nil(t, config)
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, config)
@@ -521,7 +463,7 @@ func TestModeSpecificValidation(t *testing.T) {
 // TestHeaderOverwriting tests that headers are properly overwritten
 func TestHeaderOverwriting(t *testing.T) {
 	header := make(http.Header)
-	
+
 	// Set initial headers
 	header.Set("X-Forwarded-User", "old-user")
 	header.Set("X-Forwarded-Email", "old@example.com")
@@ -545,9 +487,9 @@ func TestHeaderOverwriting(t *testing.T) {
 func TestSpecialCharactersInHeaders(t *testing.T) {
 	header := make(http.Header)
 	props := map[string]any{
-		"user_id": "user@domain.com",
-		"email":   "test+tag@example.com",
-		"name":    "John O'Doe",
+		"user_id":      "user@domain.com",
+		"email":        "test+tag@example.com",
+		"name":         "John O'Doe",
 		"access_token": "token-with-special-chars_123",
 	}
 

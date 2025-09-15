@@ -5,11 +5,11 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/proxy"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,49 +20,16 @@ func TestIntegrationFlow(t *testing.T) {
 		t.Skip("Skipping integration tests in short mode")
 	}
 
-	// Note: Using standard HTTP handlers instead of Gin
-
-	// Set required environment variables for testing
-	oldVars := map[string]string{
-		"OAUTH_CLIENT_ID":     os.Getenv("OAUTH_CLIENT_ID"),
-		"OAUTH_CLIENT_SECRET": os.Getenv("OAUTH_CLIENT_SECRET"),
-		"OAUTH_AUTHORIZE_URL": os.Getenv("OAUTH_AUTHORIZE_URL"),
-		"SCOPES_SUPPORTED":    os.Getenv("SCOPES_SUPPORTED"),
-		"MCP_SERVER_URL":      os.Getenv("MCP_SERVER_URL"),
-		"DATABASE_DSN":        os.Getenv("DATABASE_DSN"),
-	}
-
-	// Set test environment variables
-	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-		"MCP_SERVER_URL":      "http://localhost:8081",
-		"DATABASE_DSN":        os.Getenv("TEST_DATABASE_DSN"), // Use test database if available
-	}
-
-	for key, value := range testEnvVars {
-		if value != "" {
-			if err := os.Setenv(key, value); err != nil {
-				t.Logf("Failed to set %s: %v", key, err)
-			}
-		}
-	}
-
-	// Restore environment variables after test
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				_ = os.Setenv(key, value)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-		}
-	}()
-
 	// Create OAuth proxy
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode:              proxy.ModeProxy,
+		MCPServerURL:      "http://localhost:8081/",
+		OAuthClientID:     "test_client_id",
+		OAuthClientSecret: "test_client_secret",
+		OAuthAuthorizeURL: "https://accounts.google.com",
+		ScopesSupported:   "openid,profile,email",
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -144,43 +111,16 @@ func TestIntegrationFlow(t *testing.T) {
 }
 
 func TestOAuthProxyCreation(t *testing.T) {
-	// Test that we can create an OAuth proxy without errors when all required env vars are set
-	oldVars := map[string]string{
-		"OAUTH_CLIENT_ID":     os.Getenv("OAUTH_CLIENT_ID"),
-		"OAUTH_CLIENT_SECRET": os.Getenv("OAUTH_CLIENT_SECRET"),
-		"OAUTH_AUTHORIZE_URL": os.Getenv("OAUTH_AUTHORIZE_URL"),
-		"SCOPES_SUPPORTED":    os.Getenv("SCOPES_SUPPORTED"),
-		"MCP_SERVER_URL":      os.Getenv("MCP_SERVER_URL"),
-	}
-
-	// Set minimal required environment
-	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-		"MCP_SERVER_URL":      "http://localhost:8081",
-	}
-
-	for key, value := range testEnvVars {
-		if err := os.Setenv(key, value); err != nil {
-			t.Fatalf("Failed to set %s: %v", key, err)
-		}
-	}
-
-	// Restore environment variables after test
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				_ = os.Setenv(key, value)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-		}
-	}()
-
 	// Create OAuth proxy
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode:              proxy.ModeProxy,
+		MCPServerURL:      "http://localhost:8081/",
+		OAuthClientID:     "test_client_id",
+		OAuthClientSecret: "test_client_secret",
+		OAuthAuthorizeURL: "https://accounts.google.com",
+		ScopesSupported:   "openid,profile,email",
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -204,36 +144,16 @@ func TestOAuthProxyStart(t *testing.T) {
 		t.Skip("Skipping OAuth proxy start test in short mode")
 	}
 
-	// Set minimal required environment
-	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-		"MCP_SERVER_URL":      "http://localhost:8081",
-	}
-
-	oldVars := make(map[string]string)
-	for key, value := range testEnvVars {
-		oldVars[key] = os.Getenv(key)
-		if err := os.Setenv(key, value); err != nil {
-			t.Fatalf("Failed to set %s: %v", key, err)
-		}
-	}
-
-	// Restore environment variables after test
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				_ = os.Setenv(key, value)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-		}
-	}()
-
 	// Create OAuth proxy
-	config, err := proxy.LoadConfigFromEnv()
+	config := &types.Config{
+		Mode:              proxy.ModeProxy,
+		MCPServerURL:      "http://localhost:8081/",
+		OAuthClientID:     "test_client_id",
+		OAuthClientSecret: "test_client_secret",
+		OAuthAuthorizeURL: "https://accounts.google.com",
+		ScopesSupported:   "openid,profile,email",
+	}
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -276,51 +196,16 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration tests in short mode")
 	}
-
-	// Set required environment variables for forward auth testing
-	oldVars := map[string]string{
-		"OAUTH_CLIENT_ID":     os.Getenv("OAUTH_CLIENT_ID"),
-		"OAUTH_CLIENT_SECRET": os.Getenv("OAUTH_CLIENT_SECRET"),
-		"OAUTH_AUTHORIZE_URL": os.Getenv("OAUTH_AUTHORIZE_URL"),
-		"SCOPES_SUPPORTED":    os.Getenv("SCOPES_SUPPORTED"),
-		"MCP_SERVER_URL":      os.Getenv("MCP_SERVER_URL"),
-		"DATABASE_DSN":        os.Getenv("DATABASE_DSN"),
-		"PROXY_MODE":          os.Getenv("PROXY_MODE"),
-		"PORT":                os.Getenv("PORT"),
+	config := &types.Config{
+		Mode:              proxy.ModeForwardAuth,
+		MCPServerURL:      "http://localhost:8081/",
+		OAuthClientID:     "test_client_id",
+		OAuthClientSecret: "test_client_secret",
+		OAuthAuthorizeURL: "https://accounts.google.com",
+		ScopesSupported:   "openid,profile,email",
+		Port:              "8082",
 	}
-
-	// Set test environment variables for forward auth mode
-	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-		"PROXY_MODE":          "forward_auth",
-		"PORT":                "8082", // Different port to avoid conflicts
-		"DATABASE_DSN":        os.Getenv("TEST_DATABASE_DSN"), // Use test database if available
-	}
-
-	for key, value := range testEnvVars {
-		if value != "" {
-			if err := os.Setenv(key, value); err != nil {
-				t.Logf("Failed to set %s: %v", key, err)
-			}
-		}
-	}
-
-	// Restore environment variables after test
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				_ = os.Setenv(key, value)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Create OAuth proxy in forward auth mode
-	config, err := proxy.LoadConfigFromEnv()
+	_, err := proxy.NewOAuthProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -375,7 +260,7 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 	// Test that forward auth mode requires authorization for protected endpoints
 	t.Run("ForwardAuthRequiresAuth", func(t *testing.T) {
 		testPaths := []string{"/api", "/data", "/protected", "/mcp", "/test"}
-		
+
 		for _, path := range testPaths {
 			t.Run("Path_"+path, func(t *testing.T) {
 				w := httptest.NewRecorder()
@@ -399,7 +284,7 @@ func TestForwardAuthIntegrationFlow(t *testing.T) {
 		// Should get unauthorized (no proxying attempt)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Bearer")
-		
+
 		// Should not have any proxy-related error messages
 		assert.NotContains(t, w.Body.String(), "proxy")
 		assert.NotContains(t, w.Body.String(), "502")
