@@ -67,6 +67,27 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 		log.Printf("Using SQLite database at: %s", databaseDSN)
 	}
 
+	if config.Port == "" {
+		config.Port = "8080"
+	}
+
+	switch config.Mode {
+	case "":
+		fmt.Println("Defaulting to proxy mode")
+		config.Mode = ModeProxy
+	case ModeProxy, ModeForwardAuth:
+	default:
+		return nil, fmt.Errorf("invalid mode: %s", config.Mode)
+	}
+
+	if config.Mode == ModeProxy {
+		if u, err := url.Parse(config.MCPServerURL); err != nil || u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("invalid MCP server URL: %w", err)
+		} else if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("MCP server URL must not contain a path, query, or fragment")
+		}
+	}
+
 	// Initialize database
 	db, err := db.New(databaseDSN)
 	if err != nil {
@@ -213,6 +234,7 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	// Metadata endpoints
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", p.withCORS(p.oauthMetadataHandler))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", p.withCORS(p.protectedResourceMetadataHandler))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/{path...}", p.withCORS(p.protectedResourceMetadataHandler))
 
 	mux.HandleFunc("GET "+prefix+"/auth/mcp-ui/success", p.withCORS(p.withRateLimit(successHandler)))
 

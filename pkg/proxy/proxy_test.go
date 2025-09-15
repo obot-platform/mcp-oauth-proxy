@@ -31,11 +31,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}()
 
 	t.Run("DefaultMode", func(t *testing.T) {
-		_ = os.Unsetenv("PROXY_MODE")
-		_ = os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
-
 		config := &types.Config{
-			Mode: ModeProxy,
+			Mode:         ModeProxy,
+			MCPServerURL: "http://localhost:8081",
 		}
 		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
@@ -43,9 +41,6 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	})
 
 	t.Run("DefaultPort", func(t *testing.T) {
-		_ = os.Unsetenv("PORT")
-		_ = os.Setenv("PROXY_MODE", ModeForwardAuth)
-
 		config := &types.Config{
 			Mode: ModeForwardAuth,
 		}
@@ -55,11 +50,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	})
 
 	t.Run("CustomPort", func(t *testing.T) {
-		_ = os.Setenv("PORT", "9090")
-		_ = os.Setenv("PROXY_MODE", ModeForwardAuth)
-
 		config := &types.Config{
 			Mode: ModeForwardAuth,
+			Port: "9090",
 		}
 		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
@@ -67,11 +60,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	})
 
 	t.Run("ValidProxyMode", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", ModeProxy)
-		_ = os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
-
 		config := &types.Config{
-			Mode: ModeProxy,
+			Mode:         ModeProxy,
+			MCPServerURL: "http://localhost:8081",
 		}
 		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
@@ -79,9 +70,6 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	})
 
 	t.Run("ValidForwardAuthMode", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", ModeForwardAuth)
-		os.Unsetenv("MCP_SERVER_URL") // Not required for forward auth mode
-
 		config := &types.Config{
 			Mode: ModeForwardAuth,
 		}
@@ -91,34 +79,24 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	})
 
 	t.Run("InvalidMode", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", "invalid_mode")
-
 		config := &types.Config{
 			Mode: "invalid_mode",
 		}
 		_, err := NewOAuthProxy(config)
 		assert.Error(t, err)
-		assert.Nil(t, config)
 		assert.Contains(t, err.Error(), "invalid mode: invalid_mode")
 	})
 
 	t.Run("ProxyModeRequiresMCPServerURL", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", ModeProxy)
-		os.Unsetenv("MCP_SERVER_URL")
-
 		config := &types.Config{
 			Mode: ModeProxy,
 		}
 		_, err := NewOAuthProxy(config)
 		assert.Error(t, err)
-		assert.Nil(t, config)
 		assert.Contains(t, err.Error(), "invalid MCP server URL")
 	})
 
 	t.Run("ForwardAuthModeDoesNotRequireMCPServerURL", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", ModeForwardAuth)
-		os.Unsetenv("MCP_SERVER_URL")
-
 		config := &types.Config{
 			Mode: ModeForwardAuth,
 		}
@@ -141,11 +119,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				_ = os.Setenv("PROXY_MODE", ModeProxy)
-				_ = os.Setenv("MCP_SERVER_URL", tc.url)
-
 				config := &types.Config{
-					Mode: ModeProxy,
+					Mode:         ModeProxy,
+					MCPServerURL: tc.url,
 				}
 				_, err := NewOAuthProxy(config)
 				require.NoError(t, err)
@@ -168,15 +144,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				_ = os.Setenv("PROXY_MODE", ModeProxy)
-				_ = os.Setenv("MCP_SERVER_URL", tc.url)
-
 				config := &types.Config{
-					Mode: ModeProxy,
+					Mode:         ModeProxy,
+					MCPServerURL: tc.url,
 				}
 				_, err := NewOAuthProxy(config)
 				assert.Error(t, err)
-				assert.Nil(t, config)
 			})
 		}
 	})
@@ -271,42 +244,14 @@ func TestOAuthProxyCreationWithModes(t *testing.T) {
 		t.Skip("Skipping OAuth proxy creation tests in short mode")
 	}
 
-	baseEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-	}
-
-	// Save and restore environment
-	oldVars := make(map[string]string)
-	for key := range baseEnvVars {
-		oldVars[key] = os.Getenv(key)
-	}
-	oldVars["PROXY_MODE"] = os.Getenv("PROXY_MODE")
-	oldVars["MCP_SERVER_URL"] = os.Getenv("MCP_SERVER_URL")
-
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				_ = os.Setenv(key, value)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Set base environment
-	for key, value := range baseEnvVars {
-		_ = os.Setenv(key, value)
-	}
-
 	t.Run("ProxyMode", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", ModeProxy)
-		_ = os.Setenv("MCP_SERVER_URL", "http://localhost:8081")
-
 		config := &types.Config{
-			Mode: ModeProxy,
+			Mode:              ModeProxy,
+			MCPServerURL:      "http://localhost:8081",
+			OAuthClientID:     "test_client_id",
+			OAuthClientSecret: "test_client_secret",
+			OAuthAuthorizeURL: "https://accounts.google.com",
+			ScopesSupported:   "openid,profile,email",
 		}
 		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
@@ -325,11 +270,12 @@ func TestOAuthProxyCreationWithModes(t *testing.T) {
 	})
 
 	t.Run("ForwardAuthMode", func(t *testing.T) {
-		_ = os.Setenv("PROXY_MODE", ModeForwardAuth)
-		os.Unsetenv("MCP_SERVER_URL") // Not required for forward auth
-
 		config := &types.Config{
-			Mode: ModeForwardAuth,
+			Mode:              ModeForwardAuth,
+			OAuthClientID:     "test_client_id",
+			OAuthClientSecret: "test_client_secret",
+			OAuthAuthorizeURL: "https://accounts.google.com",
+			ScopesSupported:   "openid,profile,email",
 		}
 		_, err := NewOAuthProxy(config)
 		require.NoError(t, err)
@@ -354,37 +300,13 @@ func TestForwardAuthModeIntegration(t *testing.T) {
 		t.Skip("Skipping integration tests in short mode")
 	}
 
-	// Set up test environment for forward auth mode
-	testEnvVars := map[string]string{
-		"OAUTH_CLIENT_ID":     "test_client_id",
-		"OAUTH_CLIENT_SECRET": "test_client_secret",
-		"OAUTH_AUTHORIZE_URL": "https://accounts.google.com",
-		"SCOPES_SUPPORTED":    "openid,profile,email",
-		"PROXY_MODE":          ModeForwardAuth,
-		"PORT":                "8080",
-	}
-
-	// Save original environment
-	oldVars := make(map[string]string)
-	for key, value := range testEnvVars {
-		oldVars[key] = os.Getenv(key)
-		_ = os.Setenv(key, value)
-	}
-
-	// Restore environment after test
-	defer func() {
-		for key, value := range oldVars {
-			if value != "" {
-				_ = os.Setenv(key, value)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
 	// Create OAuth proxy in forward auth mode
 	config := &types.Config{
-		Mode: ModeForwardAuth,
+		Mode:              ModeForwardAuth,
+		OAuthClientID:     "test_client_id",
+		OAuthClientSecret: "test_client_secret",
+		OAuthAuthorizeURL: "https://accounts.google.com",
+		ScopesSupported:   "openid,profile,email",
 	}
 	_, err := NewOAuthProxy(config)
 	require.NoError(t, err)
@@ -515,33 +437,11 @@ func TestModeSpecificValidation(t *testing.T) {
 		},
 	}
 
-	// Save original environment
-	originalMode := os.Getenv("PROXY_MODE")
-	originalURL := os.Getenv("MCP_SERVER_URL")
-	defer func() {
-		if originalMode != "" {
-			_ = os.Setenv("PROXY_MODE", originalMode)
-		} else {
-			_ = os.Unsetenv("PROXY_MODE")
-		}
-		if originalURL != "" {
-			_ = os.Setenv("MCP_SERVER_URL", originalURL)
-		} else {
-			_ = os.Unsetenv("MCP_SERVER_URL")
-		}
-	}()
-
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_ = os.Setenv("PROXY_MODE", tc.mode)
-			if tc.mcpServerURL != "" {
-				_ = os.Setenv("MCP_SERVER_URL", tc.mcpServerURL)
-			} else {
-				_ = os.Unsetenv("MCP_SERVER_URL")
-			}
-
 			config := &types.Config{
-				Mode: tc.mode,
+				Mode:         tc.mode,
+				MCPServerURL: tc.mcpServerURL,
 			}
 			_, err := NewOAuthProxy(config)
 
@@ -550,7 +450,6 @@ func TestModeSpecificValidation(t *testing.T) {
 				if tc.errorContains != "" {
 					assert.Contains(t, err.Error(), tc.errorContains)
 				}
-				assert.Nil(t, config)
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, config)
