@@ -5,13 +5,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -43,7 +43,6 @@ type OAuthProxy struct {
 	provider      string
 	encryptionKey []byte
 	resourceName  string
-	lock          sync.Mutex
 	config        *types.Config
 
 	ctx    context.Context
@@ -53,6 +52,7 @@ type OAuthProxy struct {
 const (
 	ModeProxy       = "proxy"
 	ModeForwardAuth = "forward_auth"
+	Middleware      = "middleware"
 )
 
 func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
@@ -206,7 +206,7 @@ func (p *OAuthProxy) Start(ctx context.Context) error {
 	return nil
 }
 
-func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
+func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux, next http.Handler) {
 	provider, err := p.providers.GetProvider(p.provider)
 	if err != nil {
 		log.Fatalf("Failed to get provider: %v", err)
@@ -216,7 +216,7 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	tokenHandler := token.NewHandler(p.db)
 	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.mcpUIManager)
 	revokeHandler := revoke.NewHandler(p.db)
-	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported, p.config.RoutePrefix)
+	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported, p.config.RoutePrefix, p.config.RequiredAuthPaths)
 	successHandler := success.NewHandler()
 
 	// Get route prefix from config
@@ -239,13 +239,15 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+prefix+"/auth/mcp-ui/success", p.withCORS(p.withRateLimit(successHandler)))
 
 	// Protect everything else
-	mux.HandleFunc(prefix+"/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(p.mcpProxyHandler))))
+	mux.HandleFunc(prefix+"/{path...}", p.withCORS(p.withRateLimit(tokenValidator.WithTokenValidation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p.mcpProxyHandler(w, r, next)
+	})))))
 }
 
 // GetHandler returns an http.Handler for the OAuth proxy
 func (p *OAuthProxy) GetHandler() http.Handler {
 	mux := http.NewServeMux()
-	p.SetupRoutes(mux)
+	p.SetupRoutes(mux, nil)
 
 	// Wrap with logging middleware
 	loggedHandler := handlers.LoggingHandler(os.Stdout, mux)
@@ -335,20 +337,17 @@ func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *
 	handlerutils.JSON(w, http.StatusOK, metadata)
 }
 
-func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
+func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	tokenInfo := validate.GetTokenInfo(r)
 	path := r.PathValue("path")
 
 	// Check if the access token is expired and refresh if needed
-	if tokenInfo.Props != nil {
+	if tokenInfo != nil && tokenInfo.Props != nil {
 		if _, ok := tokenInfo.Props["access_token"].(string); ok {
 			// Check if token is expired (with a 5-minute buffer)
 			expiresAt, ok := tokenInfo.Props["expires_at"].(float64)
 			if ok && expiresAt > 0 {
 				if time.Now().Add(5 * time.Minute).After(time.Unix(int64(expiresAt), 0)) {
-					// when refreshing token, we need to lock the database to avoid race conditions
-					// otherwise we could get save the old access token into the database when another refresh process is running
-					p.lock.Lock()
 					log.Printf("Access token is expired or will expire soon, attempting to refresh")
 
 					// Get the refresh token
@@ -359,7 +358,6 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 							"error":             "invalid_token",
 							"error_description": "Access token expired and no refresh token available",
 						})
-						p.lock.Unlock()
 						return
 					}
 
@@ -371,7 +369,6 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 							"error":             "server_error",
 							"error_description": "Failed to refresh token",
 						})
-						p.lock.Unlock()
 						return
 					}
 
@@ -384,7 +381,6 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 							"error":             "server_error",
 							"error_description": "OAuth credentials not configured",
 						})
-						p.lock.Unlock()
 						return
 					}
 
@@ -396,7 +392,6 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 							"error":             "invalid_token",
 							"error_description": "Failed to refresh access token",
 						})
-						p.lock.Unlock()
 						return
 					}
 
@@ -407,14 +402,11 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 							"error":             "server_error",
 							"error_description": "Failed to update grant with new token",
 						})
-						p.lock.Unlock()
 						return
 					}
 
 					// Update the token info with the new access token for the current request
 					tokenInfo.Props["access_token"] = newTokenInfo.AccessToken
-					p.lock.Unlock()
-
 					log.Printf("Successfully refreshed access token")
 				}
 			}
@@ -422,6 +414,8 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch p.config.Mode {
+	case Middleware:
+		next.ServeHTTP(w, r)
 	case ModeForwardAuth:
 		setHeaders(w.Header(), tokenInfo.Props)
 	case ModeProxy:
@@ -508,12 +502,16 @@ func (p *OAuthProxy) updateGrant(grantID, userID string, oldTokenInfo *tokens.To
 		return fmt.Errorf("failed to get grant: %w", err)
 	}
 
-	// Prepare sensitive props data
-	sensitiveProps := map[string]any{
-		"access_token":  newTokenInfo.AccessToken,
-		"refresh_token": newTokenInfo.RefreshToken,
-		"expires_at":    newTokenInfo.Expiry.Unix(),
+	sensitiveProps := map[string]any{}
+	if oldTokenInfo.Props != nil {
+		// keep all the old props, that include a lot of the user info
+		maps.Copy(sensitiveProps, oldTokenInfo.Props)
 	}
+
+	// Prepare sensitive props data
+	sensitiveProps["access_token"] = newTokenInfo.AccessToken
+	sensitiveProps["refresh_token"] = newTokenInfo.RefreshToken
+	sensitiveProps["expires_at"] = newTokenInfo.Expiry.Unix()
 
 	// Add existing user info if available
 	if grant.Props != nil {

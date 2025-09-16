@@ -19,15 +19,16 @@ import (
 )
 
 type TokenValidator struct {
-	tokenManager    *tokens.TokenManager
-	encryptionKey   []byte
-	mcpUIManager    *mcpui.Manager     // Optional MCP UI manager for JWT handling
-	db              TokenStore         // Database for refresh operations
-	provider        providers.Provider // OAuth provider for generating auth URLs
-	clientID        string             // OAuth client ID
-	clientSecret    string             // OAuth client secret
-	scopesSupported []string           // Supported OAuth scopes
-	routePrefix     string
+	tokenManager      *tokens.TokenManager
+	encryptionKey     []byte
+	mcpUIManager      *mcpui.Manager     // Optional MCP UI manager for JWT handling
+	db                TokenStore         // Database for refresh operations
+	provider          providers.Provider // OAuth provider for generating auth URLs
+	clientID          string             // OAuth client ID
+	clientSecret      string             // OAuth client secret
+	scopesSupported   []string           // Supported OAuth scopes
+	routePrefix       string
+	requiredAuthPaths []string
 }
 
 // TokenStore interface for database operations needed by validator
@@ -39,17 +40,18 @@ type TokenStore interface {
 	StoreAuthRequest(key string, data map[string]any) error
 }
 
-func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Manager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string, routePrefix string) *TokenValidator {
+func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Manager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string, routePrefix string, requiredAuthPaths []string) *TokenValidator {
 	return &TokenValidator{
-		mcpUIManager:    mcpUIManager,
-		tokenManager:    tokenManager,
-		encryptionKey:   encryptionKey,
-		db:              db,
-		provider:        provider,
-		clientID:        clientID,
-		clientSecret:    clientSecret,
-		scopesSupported: scopesSupported,
-		routePrefix:     routePrefix,
+		mcpUIManager:      mcpUIManager,
+		tokenManager:      tokenManager,
+		encryptionKey:     encryptionKey,
+		db:                db,
+		provider:          provider,
+		clientID:          clientID,
+		clientSecret:      clientSecret,
+		scopesSupported:   scopesSupported,
+		routePrefix:       routePrefix,
+		requiredAuthPaths: requiredAuthPaths,
 	}
 }
 
@@ -181,6 +183,21 @@ func (p *TokenValidator) setCookiesForRefresh(w http.ResponseWriter, r *http.Req
 func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" && len(p.requiredAuthPaths) > 0 {
+			matches := false
+			for _, path := range p.requiredAuthPaths {
+				if strings.HasPrefix(r.URL.Path, path) {
+					matches = true
+					break
+				}
+			}
+			if !matches {
+				// Not a protected path, skip validation
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		if authHeader == "" {
 			// Try cookie-based authentication with refresh capability
 			var bearerTokenFromCookie string
@@ -351,7 +368,8 @@ func (p *TokenValidator) handleOauthFlow(w http.ResponseWriter, r *http.Request)
 }
 
 func GetTokenInfo(r *http.Request) *tokens.TokenInfo {
-	return r.Context().Value(tokenInfoKey{}).(*tokens.TokenInfo)
+	v, _ := r.Context().Value(tokenInfoKey{}).(*tokens.TokenInfo)
+	return v
 }
 
 type tokenInfoKey struct{}

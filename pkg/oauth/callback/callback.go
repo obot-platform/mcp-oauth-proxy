@@ -1,6 +1,7 @@
 package callback
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -198,6 +199,8 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if needsUserInfo {
 		sensitiveProps["email"] = userInfo.Email
 		sensitiveProps["name"] = userInfo.Name
+		infoJSON, _ := json.Marshal(userInfo)
+		sensitiveProps["info"] = string(infoJSON)
 	}
 
 	// Initialize props map

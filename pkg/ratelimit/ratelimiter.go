@@ -1,10 +1,14 @@
 package ratelimit
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // RateLimiter simple in-memory rate limiter
 type RateLimiter struct {
 	requests map[string][]time.Time
+	lock     sync.Mutex
 	window   time.Duration
 	max      int
 }
@@ -18,6 +22,8 @@ func NewRateLimiter(window time.Duration, max int) *RateLimiter {
 }
 
 func (rl *RateLimiter) Allow(key string) bool {
+	rl.lock.Lock()
+	defer rl.lock.Unlock()
 	now := time.Now()
 	windowStart := now.Add(-rl.window)
 
