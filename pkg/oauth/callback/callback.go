@@ -14,6 +14,7 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/mcpui"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
+	"golang.org/x/oauth2"
 )
 
 type Store interface {
@@ -195,6 +196,8 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"expires_at":    tokenInfo.Expiry.Unix(),
 	}
 
+	extractSpecialProps(tokenInfo, sensitiveProps)
+
 	// Only add user info if we have it
 	if needsUserInfo {
 		sensitiveProps["email"] = userInfo.Email
@@ -327,4 +330,12 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Redirect back to the client
 	w.Header().Set("Location", parsedURL.String())
 	w.WriteHeader(http.StatusFound)
+}
+
+func extractSpecialProps(tokenInfo *oauth2.Token, props map[string]any) {
+	// Salesforce instance URL
+	url := tokenInfo.Extra("instance_url")
+	if v, ok := url.(string); ok && v != "" {
+		props["instance_url"] = v
+	}
 }

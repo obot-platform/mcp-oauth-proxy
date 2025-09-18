@@ -492,6 +492,13 @@ func setHeaders(header http.Header, props map[string]any) {
 	} else {
 		header.Del("X-Forwarded-Access-Token")
 	}
+
+	// Salesforce instance URL
+	if instanceURL, ok := props["instance_url"].(string); ok {
+		header.Set("X-Forwarded-Instance-URL", instanceURL)
+	} else {
+		header.Del("X-Forwarded-Instance-URL")
+	}
 }
 
 // updateGrant updates a grant with new token information
