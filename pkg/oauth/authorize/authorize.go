@@ -112,20 +112,12 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if redirect_uri is registered, or auto-add it for localhost/127.0.0.1 URIs
-	// MCP clients often use dynamic ports on localhost, so we allow those automatically
 	if !slices.Contains(clientInfo.RedirectUris, authReq.RedirectURI) {
-		if strings.HasPrefix(authReq.RedirectURI, "http://localhost") || strings.HasPrefix(authReq.RedirectURI, "http://127.0.0.1") {
-			clientInfo.RedirectUris = append(clientInfo.RedirectUris, authReq.RedirectURI)
-			// Best effort to persist the new redirect URI
-			_ = p.db.StoreClient(clientInfo)
-		} else {
-			handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
-				Error:            "invalid_request",
-				ErrorDescription: "Invalid redirect URI",
-			})
-			return
-		}
+		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
+			Error:            "invalid_request",
+			ErrorDescription: "Invalid redirect URI",
+		})
+		return
 	}
 
 	// Check if provider is configured
