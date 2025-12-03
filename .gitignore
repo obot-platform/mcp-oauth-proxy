@@ -1,6 +1,7 @@
 # IDE files
-.idea
-.vscode
+.idea/
+.vscode/
+.zed/
 
 # Go build artifacts
 bin/
