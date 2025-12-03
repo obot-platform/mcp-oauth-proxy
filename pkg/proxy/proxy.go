@@ -52,7 +52,7 @@ type OAuthProxy struct {
 const (
 	ModeProxy       = "proxy"
 	ModeForwardAuth = "forward_auth"
-	Middleware      = "middleware"
+	ModeMiddleware  = "middleware"
 )
 
 func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
@@ -75,7 +75,7 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 	case "":
 		fmt.Println("Defaulting to proxy mode")
 		config.Mode = ModeProxy
-	case ModeProxy, ModeForwardAuth:
+	case ModeProxy, ModeForwardAuth, ModeMiddleware:
 	default:
 		return nil, fmt.Errorf("invalid mode: %s", config.Mode)
 	}
@@ -414,7 +414,7 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request, nex
 	}
 
 	switch p.config.Mode {
-	case Middleware:
+	case ModeMiddleware:
 		next.ServeHTTP(w, r)
 	case ModeForwardAuth:
 		setHeaders(w.Header(), tokenInfo.Props)
