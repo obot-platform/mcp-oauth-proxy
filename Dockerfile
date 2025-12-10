@@ -20,7 +20,7 @@ ARG VERSION=dev
 ARG BUILD_TIME=unknown
 
 # Build the application with version info
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+RUN CGO_ENABLED=0 go build \
     -ldflags="-X main.version=${VERSION} -X main.buildTime=${BUILD_TIME} -s -w" \
     -o oauth-proxy .
 
