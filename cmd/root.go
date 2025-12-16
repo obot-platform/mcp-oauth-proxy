@@ -26,6 +26,7 @@ type RootCmd struct {
 	OAuthClientID     string `name:"oauth-client-id" env:"OAUTH_CLIENT_ID" usage:"OAuth client ID from your OAuth provider" required:"true"`
 	OAuthClientSecret string `name:"oauth-client-secret" env:"OAUTH_CLIENT_SECRET" usage:"OAuth client secret from your OAuth provider" required:"true"`
 	OAuthAuthorizeURL string `name:"oauth-authorize-url" env:"OAUTH_AUTHORIZE_URL" usage:"Authorization endpoint URL from your OAuth provider (e.g., https://accounts.google.com)" required:"true"`
+	OAuthJWKSURL      string `name:"oauth-jwks-url" env:"OAUTH_JWKS_URL" usage:"JWKS endpoint URL from your OAuth provider (e.g., https://accounts.google.com/.well-known/openid-configuration/jwks)"`
 
 	// Scopes and MCP configuration
 	ScopesSupported string `name:"scopes-supported" env:"SCOPES_SUPPORTED" usage:"Comma-separated list of supported OAuth scopes (e.g., 'openid,profile,email')" required:"true"`
@@ -66,6 +67,7 @@ func (c *RootCmd) Run(cobraCmd *cobra.Command, args []string) error {
 		OAuthClientID:     c.OAuthClientID,
 		OAuthClientSecret: c.OAuthClientSecret,
 		OAuthAuthorizeURL: c.OAuthAuthorizeURL,
+		OAuthJWKSURL:      c.OAuthJWKSURL,
 		ScopesSupported:   c.ScopesSupported,
 		MCPServerURL:      c.MCPServerURL,
 		EncryptionKey:     c.EncryptionKey,
@@ -145,7 +147,7 @@ func (c *RootCmd) Customize(cobraCmd *cobra.Command) {
 	cobraCmd.Long = `MCP OAuth Proxy is a comprehensive OAuth 2.1 proxy server that provides
 OAuth authorization server functionality with PostgreSQL/SQLite storage.
 
-This proxy supports multiple OAuth providers (Google, Microsoft, GitHub) and 
+This proxy supports multiple OAuth providers (Google, Microsoft, GitHub) and
 proxies requests to MCP servers with user context headers.
 
 Examples:
@@ -176,7 +178,7 @@ Configuration:
   1. Default values
   2. Environment variables
   3. Command line flags
-  
+
 Database Support:
   - PostgreSQL: Full ACID compliance, recommended for production
   - SQLite: Zero configuration, perfect for development and small deployments`
