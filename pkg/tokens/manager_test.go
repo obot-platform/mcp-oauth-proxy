@@ -52,7 +52,7 @@ func TestTokenManager(t *testing.T) {
 		tokenManager, err := NewTokenManager(mockDB)
 		require.NoError(t, err)
 
-		assert.Equal(t, mockDB, tokenManager.DB)
+		assert.Equal(t, mockDB, tokenManager.db)
 	})
 
 	t.Run("TestValidateAccessToken", func(t *testing.T) {
@@ -61,20 +61,20 @@ func TestTokenManager(t *testing.T) {
 		require.NoError(t, err)
 
 		// Test without database
-		tokenManager.DB = nil
-		_, err = tokenManager.ValidateAccessToken("test_token")
+		tokenManager.db = nil
+		_, err = tokenManager.validateAccessToken("user123:grant456:access_token_123")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "database not configured")
 
 		// Test with database but no token
-		tokenManager.DB = mockDB
-		_, err = tokenManager.ValidateAccessToken("non_existent_token")
+		tokenManager.db = mockDB
+		_, err = tokenManager.validateAccessToken("non_existent_token")
 		assert.Error(t, err)
 		// The error could be either "token not found" or "invalid token format" depending on the token format
 		assert.True(t, strings.Contains(err.Error(), "token not found") || strings.Contains(err.Error(), "invalid token format"))
 
 		// Test with invalid token format
-		_, err = tokenManager.ValidateAccessToken("invalid_token_format")
+		_, err = tokenManager.validateAccessToken("invalid_token_format")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid token format")
 
@@ -93,7 +93,7 @@ func TestTokenManager(t *testing.T) {
 			RevokedAt:   &expiredTime,
 		}
 
-		_, err = tokenManager.ValidateAccessToken(validToken)
+		_, err = tokenManager.validateAccessToken(validToken)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "token has been revoked")
 
@@ -110,7 +110,7 @@ func TestTokenManager(t *testing.T) {
 			Revoked:     false,
 		}
 
-		_, err = tokenManager.ValidateAccessToken(expiredToken)
+		_, err = tokenManager.validateAccessToken(expiredToken)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "token has expired")
 
@@ -127,7 +127,7 @@ func TestTokenManager(t *testing.T) {
 			Revoked:     false,
 		}
 
-		_, err = tokenManager.ValidateAccessToken(validTokenNoGrant)
+		_, err = tokenManager.validateAccessToken(validTokenNoGrant)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "grant not found")
 
@@ -155,7 +155,7 @@ func TestTokenManager(t *testing.T) {
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
 
-		claims, err := tokenManager.ValidateAccessToken(validTokenWithGrant)
+		claims, err := tokenManager.validateAccessToken(validTokenWithGrant)
 		require.NoError(t, err)
 		assert.Equal(t, "user123", claims.UserID)
 		assert.Equal(t, map[string]any{"email": "test@example.com", "name": "Test User"}, claims.Props)
@@ -212,7 +212,7 @@ func TestTokenClaims(t *testing.T) {
 		"role":  "admin",
 	}
 
-	claims := &TokenClaims{
+	claims := &TokenInfo{
 		UserID:    "user123",
 		Props:     props,
 		ExpiresAt: expiresAt,
@@ -249,19 +249,19 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("TestEmptyToken", func(t *testing.T) {
-		_, err := tokenManager.ValidateAccessToken("")
+		_, err := tokenManager.validateAccessToken("")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid token format")
 	})
 
 	t.Run("TestTokenWithEmptyParts", func(t *testing.T) {
-		_, err := tokenManager.ValidateAccessToken("user123::access_token")
+		_, err := tokenManager.validateAccessToken("user123::access_token")
 		assert.Error(t, err)
 		// Should still be valid as empty parts are allowed
 	})
 
 	t.Run("TestTokenWithTooManyParts", func(t *testing.T) {
-		_, err := tokenManager.ValidateAccessToken("user123:grant456:access_token:extra_part")
+		_, err := tokenManager.validateAccessToken("user123:grant456:access_token:extra_part")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid token format")
 	})
@@ -292,7 +292,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
 
-		_, err := tokenManager.ValidateAccessToken(validToken)
+		_, err := tokenManager.validateAccessToken(validToken)
 		assert.NoError(t, err) // This should work with proper type
 	})
 
@@ -320,7 +320,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			ExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 		}
 
-		_, err := tokenManager.ValidateAccessToken(validToken)
+		_, err := tokenManager.validateAccessToken(validToken)
 		assert.NoError(t, err) // This should work with proper type
 	})
 }
@@ -332,7 +332,7 @@ func TestConcurrentTokenValidation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create multiple valid tokens
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		token := fmt.Sprintf("user%d:grant%d:token%d", i, i, i)
 		mockDB.tokens[token] = &types.TokenData{
 			AccessToken: token,
@@ -359,10 +359,10 @@ func TestConcurrentTokenValidation(t *testing.T) {
 
 	// Test concurrent validation
 	done := make(chan bool, 20)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		go func(id int) {
 			token := fmt.Sprintf("user%d:grant%d:token%d", id%10, id%10, id%10)
-			_, err := tokenManager.ValidateAccessToken(token)
+			_, err := tokenManager.validateAccessToken(token)
 			// Should not error for valid tokens
 			_ = err
 			done <- true
@@ -370,13 +370,13 @@ func TestConcurrentTokenValidation(t *testing.T) {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 
 	// Verify token manager is still functional
 	token := "user0:grant0:token0"
-	claims, err := tokenManager.ValidateAccessToken(token)
+	claims, err := tokenManager.validateAccessToken(token)
 	require.NoError(t, err)
 	assert.Equal(t, "user0", claims.UserID)
 }

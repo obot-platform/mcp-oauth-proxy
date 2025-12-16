@@ -78,7 +78,7 @@ func (m *Manager) CheckCookieAuth(r *http.Request) (string, bool) {
 	}
 
 	// Validate the bearer token
-	_, err = m.tokenManager.ValidateAccessToken(bearerToken)
+	_, err = m.tokenManager.GetTokenInfo(bearerToken)
 	if err != nil {
 		log.Printf("Bearer token from cookie is invalid: %v", err)
 		// Try to refresh the token
