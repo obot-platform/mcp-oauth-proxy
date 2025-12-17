@@ -4,6 +4,11 @@ import (
 	"time"
 )
 
+const (
+	AccessTokenCookieName  = "access_token"
+	RefreshTokenCookieName = "refresh_token"
+)
+
 // Config holds all configuration values for the OAuth proxy
 type Config struct {
 	Port              string
@@ -17,7 +22,8 @@ type Config struct {
 	MCPServerURL      string
 	Mode              string
 	RoutePrefix       string
-	RequiredAuthPaths []string
+	CookieNamePrefix  string
+	MCPPaths          []string
 }
 
 // TokenData represents stored token data for OAuth 2.1 compliance

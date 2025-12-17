@@ -18,7 +18,6 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/db"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/handlerutils"
-	"github.com/obot-platform/mcp-oauth-proxy/pkg/mcpui"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/authorize"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/callback"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/oauth/register"
@@ -34,7 +33,6 @@ import (
 )
 
 type OAuthProxy struct {
-	mcpUIManager  *mcpui.Manager
 	metadata      *types.OAuthMetadata
 	db            *db.Store
 	rateLimiter   *ratelimit.RateLimiter
@@ -121,15 +119,6 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode encryption key: %w", err)
 	}
-	mcpUIManager := mcpui.NewManager(
-		encryptionKey, // Use encryption key for JWE encryption
-		tokenManager,
-		providerManager,
-		provider,
-		config.OAuthClientID,
-		config.OAuthClientSecret,
-		db, // Add database for refresh token operations
-	)
 
 	// Split and trim scopes to handle whitespace
 	scopesSupported := ParseScopesSupported(config.ScopesSupported)
@@ -145,7 +134,6 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 	}
 
 	return &OAuthProxy{
-		mcpUIManager:  mcpUIManager,
 		metadata:      metadata,
 		db:            db,
 		rateLimiter:   rateLimiter,
@@ -193,7 +181,7 @@ func (p *OAuthProxy) Start(ctx context.Context) error {
 
 	// Setup cleanup goroutine for expired tokens
 	go func() {
-		ticker := time.NewTicker(1 * time.Hour) // Cleanup every hour
+		ticker := time.NewTicker(time.Hour) // Cleanup every hour
 		defer ticker.Stop()
 		context.AfterFunc(p.ctx, ticker.Stop)
 		for range ticker.C {
@@ -212,11 +200,17 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux, next http.Handler) {
 		log.Fatalf("Failed to get provider: %v", err)
 	}
 
+	if p.config.CookieNamePrefix == "" {
+		p.config.CookieNamePrefix = "mcp_oauth_proxy_"
+	} else if !strings.HasSuffix(p.config.CookieNamePrefix, "_") && !strings.HasSuffix(p.config.CookieNamePrefix, "-") {
+		p.config.CookieNamePrefix += "_"
+	}
+
 	authorizeHandler := authorize.NewHandler(p.db, provider, p.metadata.ScopesSupported, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix)
 	tokenHandler := token.NewHandler(p.db)
-	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.mcpUIManager)
+	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.config.CookieNamePrefix)
 	revokeHandler := revoke.NewHandler(p.db)
-	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.mcpUIManager, p.encryptionKey, p.db, provider, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.metadata.ScopesSupported, p.config.RoutePrefix, p.config.RequiredAuthPaths)
+	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey, p.db, provider, p.config.RoutePrefix, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.CookieNamePrefix, p.metadata.ScopesSupported, p.config.MCPPaths)
 	successHandler := success.NewHandler()
 
 	// Get route prefix from config
@@ -324,7 +318,7 @@ func (p *OAuthProxy) oauthMetadataHandler(w http.ResponseWriter, r *http.Request
 func (p *OAuthProxy) protectedResourceMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	baseURL := handlerutils.GetBaseURL(r)
 	prefix := p.config.RoutePrefix
-	resourceURL := baseURL + prefix
+	resourceURL := strings.TrimSuffix(baseURL+prefix, "/")
 
 	metadata := types.OAuthProtectedResourceMetadata{
 		Resource:              resourceURL,

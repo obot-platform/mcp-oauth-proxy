@@ -5,30 +5,30 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/handlerutils"
-	"github.com/obot-platform/mcp-oauth-proxy/pkg/mcpui"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/tokens"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
 
 type TokenValidator struct {
-	tokenManager      *tokens.TokenManager
-	encryptionKey     []byte
-	mcpUIManager      *mcpui.Manager     // Optional MCP UI manager for JWT handling
-	db                TokenStore         // Database for refresh operations
-	provider          providers.Provider // OAuth provider for generating auth URLs
-	clientID          string             // OAuth client ID
-	clientSecret      string             // OAuth client secret
-	scopesSupported   []string           // Supported OAuth scopes
-	routePrefix       string
-	requiredAuthPaths []string
+	tokenManager           *tokens.TokenManager
+	encryptionKey          []byte
+	db                     TokenStore         // Database for refresh operations
+	provider               providers.Provider // OAuth provider for generating auth URLs
+	routePrefix            string
+	clientID               string // OAuth client ID
+	clientSecret           string // OAuth client secret
+	accessTokenCookieName  string
+	refreshTokenCookieName string
+	scopesSupported        []string // Supported OAuth scopes
+	mcpPaths               []string
 }
 
 // TokenStore interface for database operations needed by validator
@@ -40,18 +40,19 @@ type TokenStore interface {
 	StoreAuthRequest(key string, data map[string]any) error
 }
 
-func NewTokenValidator(tokenManager *tokens.TokenManager, mcpUIManager *mcpui.Manager, encryptionKey []byte, db TokenStore, provider providers.Provider, clientID, clientSecret string, scopesSupported []string, routePrefix string, requiredAuthPaths []string) *TokenValidator {
+func NewTokenValidator(tokenManager *tokens.TokenManager, encryptionKey []byte, db TokenStore, provider providers.Provider, routePrefix, clientID, clientSecret, cookieNamePrefix string, scopesSupported, mcpPaths []string) *TokenValidator {
 	return &TokenValidator{
-		mcpUIManager:      mcpUIManager,
-		tokenManager:      tokenManager,
-		encryptionKey:     encryptionKey,
-		db:                db,
-		provider:          provider,
-		clientID:          clientID,
-		clientSecret:      clientSecret,
-		scopesSupported:   scopesSupported,
-		routePrefix:       routePrefix,
-		requiredAuthPaths: requiredAuthPaths,
+		tokenManager:           tokenManager,
+		encryptionKey:          encryptionKey,
+		db:                     db,
+		provider:               provider,
+		routePrefix:            routePrefix,
+		clientID:               clientID,
+		clientSecret:           clientSecret,
+		accessTokenCookieName:  cookieNamePrefix + types.AccessTokenCookieName,
+		refreshTokenCookieName: cookieNamePrefix + types.RefreshTokenCookieName,
+		scopesSupported:        scopesSupported,
+		mcpPaths:               mcpPaths,
 	}
 }
 
@@ -74,220 +75,69 @@ func generatePKCE() (codeVerifier, codeChallenge string) {
 	return codeVerifier, codeChallenge
 }
 
-// validateCookieAuth handles cookie-based authentication with refresh capability
-// Returns (tokenInfo, bearerToken, success)
-func (p *TokenValidator) validateCookieAuth(w http.ResponseWriter, r *http.Request, bearerToken string) (*tokens.TokenInfo, string, bool) {
-	// Validate the bearer token directly
-	tokenInfo, err := p.tokenManager.GetTokenInfo(bearerToken)
-	if err == nil {
-		return tokenInfo, bearerToken, true
-	}
-
-	// Step 2: Token is invalid, check for refresh token
-	refreshCookie, refreshErr := r.Cookie(mcpui.MCPUIRefreshCookieName)
-	if refreshErr != nil || refreshCookie.Value == "" {
-		return nil, "", false
-	}
-
-	refreshToken := refreshCookie.Value
-
-	// Step 3: Start refresh process
-	return p.performMCPUIRefresh(w, r, refreshToken)
-}
-
-// performMCPUIRefresh handles the MCP UI token refresh process
-// Returns (tokenInfo, bearerToken, success)
-func (p *TokenValidator) performMCPUIRefresh(w http.ResponseWriter, r *http.Request, refreshToken string) (*tokens.TokenInfo, string, bool) {
-	// Get token data by MCP UI refresh token
-	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
-	if err != nil {
-		return nil, "", false
-	}
-
-	return p.rotateMCPUITokens(w, r, tokenData)
-}
-
-// rotateMCPUITokens rotates access token and MCP UI refresh token, keeping regular refresh token unchanged
-// Returns (tokenInfo, bearerToken, success)
-func (p *TokenValidator) rotateMCPUITokens(w http.ResponseWriter, r *http.Request, tokenData *types.TokenData) (*tokens.TokenInfo, string, bool) {
-	// Generate new access token
-	accessTokenSecret := encryption.GenerateRandomString(32)
-	newAccessToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, accessTokenSecret)
-
-	// Generate new MCP UI refresh token
-	mcpUIRefreshTokenSecret := encryption.GenerateRandomString(32)
-	newMCPUIRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, mcpUIRefreshTokenSecret)
-
-	// Create updated token data (regular refresh token stays unchanged)
-	updatedTokenData := &types.TokenData{
-		AccessToken:           newAccessToken,
-		RefreshToken:          newMCPUIRefreshToken,
-		ClientID:              tokenData.ClientID,
-		UserID:                tokenData.UserID,
-		GrantID:               tokenData.GrantID,
-		Scope:                 tokenData.Scope,
-		ExpiresAt:             time.Now().Add(1 * time.Hour),   // 1 hour
-		RefreshTokenExpiresAt: tokenData.RefreshTokenExpiresAt, // Keep unchanged
-		CreatedAt:             time.Now(),
-		Revoked:               false,
-	}
-
-	// Store updated tokens in database
-	if err := p.db.StoreToken(updatedTokenData); err != nil {
-		return nil, "", false
-	}
-
-	// Revoke old access token
-	if err := p.db.RevokeToken(tokenData.AccessToken); err != nil {
-		log.Printf("Failed to revoke old access token: %v", err)
-	}
-
-	// Set cookies with new tokens
-	p.setCookiesForRefresh(w, r, newAccessToken, newMCPUIRefreshToken)
-
-	// Validate the new access token and return token info
-	newTokenInfo, err := p.tokenManager.GetTokenInfo(newAccessToken)
-	if err != nil {
-		log.Printf("Failed to validate newly created access token: %v", err)
-		return nil, "", false
-	}
-
-	return newTokenInfo, newAccessToken, true
-}
-
-// setCookiesForRefresh sets the MCP UI cookies after successful refresh
-func (p *TokenValidator) setCookiesForRefresh(w http.ResponseWriter, r *http.Request, accessToken, refreshToken string) {
-	// Set access token cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     mcpui.MCPUICookieName,
-		Value:    accessToken,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   r.TLS != nil,
-		MaxAge:   3600, // 1 hour
-	})
-
-	// Set refresh token cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     mcpui.MCPUIRefreshCookieName,
-		Value:    refreshToken,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   r.TLS != nil,
-		MaxAge:   30 * 24 * 3600, // 30 days
-	})
-}
-
 func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" && len(p.requiredAuthPaths) > 0 {
-			matches := false
-			for _, path := range p.requiredAuthPaths {
-				if strings.HasPrefix(r.URL.Path, path) {
-					matches = true
-					break
-				}
-			}
-			if !matches {
-				// Not a protected path, skip validation
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-
+		var (
+			token      string
+			fromCookie bool
+			authHeader = r.Header.Get("Authorization")
+		)
 		if authHeader == "" {
-			// Try cookie-based authentication with refresh capability
-			var bearerTokenFromCookie string
-			mcpUICodeCookie, err := r.Cookie(mcpui.MCPUICookieName)
-			if err == nil && mcpUICodeCookie.Value != "" {
-				bearerTokenFromCookie = mcpUICodeCookie.Value
-			}
-
-			if tokenInfo, bearerToken, success := p.validateCookieAuth(w, r, bearerTokenFromCookie); success {
-				// Add token info to request context
-				ctx := context.WithValue(r.Context(), tokenInfoKey{}, tokenInfo)
-				ctx = context.WithValue(ctx, bearerTokenKey{}, bearerToken)
-				next(w, r.WithContext(ctx))
-				return
-			} else if bearerTokenFromCookie != "" {
-				p.handleOauthFlow(w, r)
-				return
-			}
-
-			// Fall back to URL parameter (contains JWT)
-			mcpUICodeParam := r.URL.Query().Get("mcp-ui-code")
-			if mcpUICodeParam != "" {
-				bearerToken, handled := p.mcpUIManager.HandleMCPUIRequest(w, r)
-				if handled {
-					tokenInfo, err := p.tokenManager.GetTokenInfo(bearerToken)
-					if err != nil {
-						p.handleOauthFlow(w, r)
-						return
-					}
-
-					// Add token info to request context
-					ctx := context.WithValue(r.Context(), tokenInfoKey{}, tokenInfo)
-					ctx = context.WithValue(ctx, bearerTokenKey{}, bearerToken)
-					next(w, r.WithContext(ctx))
-					return
-				} else {
-					p.handleOauthFlow(w, r)
+			cookie, err := r.Cookie(p.accessTokenCookieName)
+			if err == nil && cookie.Value != "" {
+				// Decrypt the cookie value
+				token, err = encryption.DecryptCookie(p.encryptionKey, cookie.Value)
+				if err != nil {
+					p.sendUnauthorizedResponse(w, r, "Failed to decrypt token")
 					return
 				}
+				fromCookie = true
+			}
+		} else {
+			// Parse Authorization header
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
+				p.sendUnauthorizedResponse(w, r, "Invalid Authorization header format, expected 'Bearer TOKEN'")
+				return
 			}
 
-			// Return 401 with proper WWW-Authenticate header
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource%s", handlerutils.GetBaseURL(r), r.URL.Path)
-			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="%s"`, resourceMetadataUrl)
-			w.Header().Set("WWW-Authenticate", wwwAuthValue)
-			handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
-				"error":             "invalid_token",
-				"error_description": "Missing Authorization header",
-			})
-			return
+			token = parts[1]
+			fromCookie = false
 		}
-
-		// Parse Authorization header
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource%s", handlerutils.GetBaseURL(r), r.URL.Path)
-			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid Authorization header format, expected 'Bearer TOKEN'", resource_metadata="%s"`, resourceMetadataUrl)
-			w.Header().Set("WWW-Authenticate", wwwAuthValue)
-			handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
-				"error":             "invalid_token",
-				"error_description": "Invalid Authorization header format, expected 'Bearer TOKEN'",
-			})
-			return
-		}
-
-		token := parts[1]
 
 		tokenInfo, err := p.tokenManager.GetTokenInfo(token)
 		if err != nil {
-			resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource%s", handlerutils.GetBaseURL(r), r.URL.Path)
-			wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Invalid or expired token", resource_metadata="%s"`, resourceMetadataUrl)
-			w.Header().Set("WWW-Authenticate", wwwAuthValue)
-			handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
-				"error":             "invalid_token",
-				"error_description": "Invalid or expired token",
-			})
+			p.sendUnauthorizedResponse(w, r, "Invalid or expired token")
 			return
+		}
+
+		// Check if token is within 15 minutes of expiring and attempt refresh if from cookie
+		if fromCookie && time.Until(tokenInfo.ExpiresAt) < 15*time.Minute {
+			newToken, refreshErr := p.refreshAccessToken(w, r)
+			if refreshErr != nil {
+				// If token is already expired, refresh is required
+				if time.Now().After(tokenInfo.ExpiresAt) {
+					p.sendUnauthorizedResponse(w, r, "Token expired and refresh failed")
+					return
+				}
+				// Token not yet expired, log warning and continue with current token
+				fmt.Printf("Token refresh failed but token still valid, continuing: %v\n", refreshErr)
+			} else {
+				// Refresh succeeded, use new token and get updated token info
+				token = newToken
+				tokenInfo, err = p.tokenManager.GetTokenInfo(token)
+				if err != nil {
+					p.sendUnauthorizedResponse(w, r, "Failed to validate refreshed token")
+					return
+				}
+			}
 		}
 
 		// Decrypt props if needed before storing in context
 		if tokenInfo.Props != nil {
 			decryptedProps, err := encryption.DecryptPropsIfNeeded(p.encryptionKey, tokenInfo.Props)
 			if err != nil {
-				resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource%s", handlerutils.GetBaseURL(r), r.URL.Path)
-				wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Failed to decrypt token data", resource_metadata="%s"`, resourceMetadataUrl)
-				w.Header().Set("WWW-Authenticate", wwwAuthValue)
-				handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
-					"error":             "invalid_token",
-					"error_description": "Failed to decrypt token data",
-				})
+				p.sendUnauthorizedResponse(w, r, "Failed to decrypt token data")
 				return
 			}
 			tokenInfo.Props = decryptedProps
@@ -300,21 +150,97 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 	}
 }
 
-func (p *TokenValidator) handleOauthFlow(w http.ResponseWriter, r *http.Request) {
-	// Check if this is a browser request by looking at user agent
-	userAgent := r.Header.Get("User-Agent")
-	if userAgent == "" {
-		// Not a browser request, return 401
-		resourceMetadataUrl := fmt.Sprintf("%s/.well-known/oauth-protected-resource%s", handlerutils.GetBaseURL(r), r.URL.Path)
-		wwwAuthValue := fmt.Sprintf(`Bearer error="invalid_token", error_description="Authentication required", resource_metadata="%s"`, resourceMetadataUrl)
-		w.Header().Set("WWW-Authenticate", wwwAuthValue)
-		handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
-			"error":             "invalid_token",
-			"error_description": "Authentication required",
-		})
-		return
+// refreshAccessToken attempts to refresh an access token using the refresh token
+// Returns the new access token string, or an error if refresh fails
+func (p *TokenValidator) refreshAccessToken(w http.ResponseWriter, r *http.Request) (string, error) {
+	// Get refresh token from cookie
+	refreshCookie, err := r.Cookie(p.refreshTokenCookieName)
+	if err != nil || refreshCookie.Value == "" {
+		return "", fmt.Errorf("no refresh token cookie found")
 	}
 
+	// Decrypt refresh token
+	refreshToken, err := encryption.DecryptCookie(p.encryptionKey, refreshCookie.Value)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt refresh token: %w", err)
+	}
+
+	// Validate refresh token and get token data
+	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
+	if err != nil {
+		return "", fmt.Errorf("invalid refresh token: %w", err)
+	}
+
+	// Check if token is revoked
+	if tokenData.Revoked {
+		return "", fmt.Errorf("refresh token has been revoked")
+	}
+
+	// Generate new access token: userId:grantId:accessTokenSecret
+	accessTokenSecret := encryption.GenerateRandomString(32)
+	newAccessToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, accessTokenSecret)
+
+	// Generate new refresh token
+	refreshTokenSecret := encryption.GenerateRandomString(32)
+	newRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
+
+	// Store new token data in database
+	newTokenData := &types.TokenData{
+		AccessToken:           newAccessToken,
+		RefreshToken:          newRefreshToken,
+		ClientID:              tokenData.ClientID,
+		UserID:                tokenData.UserID,
+		GrantID:               tokenData.GrantID,
+		Scope:                 tokenData.Scope,
+		ExpiresAt:             time.Now().Add(time.Hour),           // 1 hour
+		RefreshTokenExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+		CreatedAt:             time.Now(),
+		Revoked:               false,
+	}
+
+	if err := p.db.StoreToken(newTokenData); err != nil {
+		return "", fmt.Errorf("failed to store new token: %w", err)
+	}
+
+	// Determine if request is secure for cookie Secure flag
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
+	// Encrypt and set access token cookie (1 hour = 3600 seconds)
+	encryptedAccessToken, err := encryption.EncryptCookie(p.encryptionKey, newAccessToken)
+	if err != nil {
+		return "", fmt.Errorf("failed to encrypt access token: %w", err)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     p.accessTokenCookieName,
+		Value:    encryptedAccessToken,
+		Path:     "/",
+		MaxAge:   3600,
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	// Encrypt and set refresh token cookie (30 days = 2592000 seconds)
+	encryptedRefreshToken, err := encryption.EncryptCookie(p.encryptionKey, newRefreshToken)
+	if err != nil {
+		return "", fmt.Errorf("failed to encrypt refresh token: %w", err)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     p.refreshTokenCookieName,
+		Value:    encryptedRefreshToken,
+		Path:     "/",
+		MaxAge:   30 * 24 * 3600,
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	return newAccessToken, nil
+}
+
+func (p *TokenValidator) handleOauthFlow(w http.ResponseWriter, r *http.Request) {
 	// Check if OAuth provider is configured
 	if p.provider == nil || p.clientID == "" || p.clientSecret == "" {
 		handlerutils.JSON(w, http.StatusInternalServerError, map[string]string{
@@ -364,7 +290,29 @@ func (p *TokenValidator) handleOauthFlow(w http.ResponseWriter, r *http.Request)
 	// Generate authorization URL with PKCE
 	authURL := p.provider.GetAuthorizationURL(p.clientID, redirectURI, scope, stateKey)
 
+	w.Header().Set("X-Redirect-URL", authURL)
 	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+func (p *TokenValidator) sendUnauthorizedResponse(w http.ResponseWriter, r *http.Request, message string) {
+	if !slices.Contains(p.mcpPaths, r.URL.Path) && strings.Contains(strings.ToLower(r.UserAgent()), "mozilla") {
+		p.handleOauthFlow(w, r)
+		return
+	}
+
+	w.Header().Set(
+		"WWW-Authenticate",
+		fmt.Sprintf(
+			`Bearer error="invalid_token", error_description="%s", resource_metadata="%s"`,
+			message,
+			fmt.Sprintf("%s/.well-known/oauth-protected-resource%s", handlerutils.GetBaseURL(r), r.URL.Path),
+		),
+	)
+
+	handlerutils.JSON(w, http.StatusUnauthorized, map[string]string{
+		"error":             "invalid_token",
+		"error_description": message,
+	})
 }
 
 func GetTokenInfo(r *http.Request) *tokens.TokenInfo {

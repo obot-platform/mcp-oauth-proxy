@@ -201,7 +201,7 @@ func testTokenOperations(t *testing.T, db *Store) {
 		UserID:                userID,
 		GrantID:               grantID,
 		Scope:                 "read write admin",
-		ExpiresAt:             time.Now().Add(1 * time.Hour),
+		ExpiresAt:             time.Now().Add(time.Hour),
 		RefreshTokenExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
 		CreatedAt:             time.Now(),
 		Revoked:               false,
@@ -315,8 +315,8 @@ func testCleanupOperations(t *testing.T, db *Store) {
 		UserID:                userID,
 		GrantID:               grantID,
 		Scope:                 "read write",
-		ExpiresAt:             time.Now().Add(-1 * time.Hour), // Expired
-		RefreshTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Also expired
+		ExpiresAt:             time.Now().Add(-time.Hour), // Expired
+		RefreshTokenExpiresAt: time.Now().Add(-time.Hour), // Also expired
 		CreatedAt:             time.Now().Add(-2 * time.Hour),
 		Revoked:               false,
 	}
@@ -380,7 +380,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		UserID:    "test_user_123",
 		Scope:     []string{"read", "write", "admin"},
 		Metadata:  map[string]any{"provider": "test", "ip": "127.0.0.1"},
-		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
 
 	err = db.StoreGrant(grant)
@@ -399,7 +399,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		UserID:       "test_user_123",
 		GrantID:      grantID,
 		Scope:        "read write admin",
-		ExpiresAt:    time.Now().Add(1 * time.Hour),
+		ExpiresAt:    time.Now().Add(time.Hour),
 		// RefreshTokenExpiresAt will be set automatically to 30 days
 		CreatedAt: time.Now(),
 		Revoked:   false,
@@ -428,7 +428,7 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		UserID:                "test_user_123",
 		GrantID:               grantID,
 		Scope:                 "read write admin",
-		ExpiresAt:             time.Now().Add(1 * time.Hour),
+		ExpiresAt:             time.Now().Add(time.Hour),
 		RefreshTokenExpiresAt: customExpiration,
 		CreatedAt:             time.Now(),
 		Revoked:               false,
@@ -464,8 +464,8 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		UserID:                "test_user_123",
 		GrantID:               grantID,
 		Scope:                 "read write admin",
-		ExpiresAt:             time.Now().Add(-1 * time.Hour), // Expired access token
-		RefreshTokenExpiresAt: time.Now().Add(1 * time.Hour),  // Valid refresh token
+		ExpiresAt:             time.Now().Add(-time.Hour), // Expired access token
+		RefreshTokenExpiresAt: time.Now().Add(time.Hour),  // Valid refresh token
 		CreatedAt:             time.Now().Add(-2 * time.Hour),
 		Revoked:               false,
 	}
@@ -486,8 +486,8 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		UserID:                "test_user_123",
 		GrantID:               grantID,
 		Scope:                 "read write admin",
-		ExpiresAt:             time.Now().Add(-1 * time.Hour), // Expired access token
-		RefreshTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Expired refresh token
+		ExpiresAt:             time.Now().Add(-time.Hour), // Expired access token
+		RefreshTokenExpiresAt: time.Now().Add(-time.Hour), // Expired refresh token
 		CreatedAt:             time.Now().Add(-2 * time.Hour),
 		Revoked:               false,
 	}
@@ -520,8 +520,8 @@ func testRefreshTokenExpiration(t *testing.T, db *Store) {
 		UserID:                "test_user_123",
 		GrantID:               grantID,
 		Scope:                 "read write admin",
-		ExpiresAt:             time.Now().Add(1 * time.Hour),
-		RefreshTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Expired refresh token
+		ExpiresAt:             time.Now().Add(time.Hour),
+		RefreshTokenExpiresAt: time.Now().Add(-time.Hour), // Expired refresh token
 		CreatedAt:             time.Now().Add(-2 * time.Hour),
 		Revoked:               false,
 	}

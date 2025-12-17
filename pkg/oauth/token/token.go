@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,14 +152,7 @@ func (p *Handler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Re
 		}
 
 		// Check if redirect URI is registered for this client
-		validRedirect := false
-		for _, uri := range clientInfo.RedirectUris {
-			if uri == redirectURI {
-				validRedirect = true
-				break
-			}
-		}
-		if !validRedirect {
+		if !slices.Contains(clientInfo.RedirectUris, redirectURI) {
 			handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
 				Error:            "invalid_grant",
 				ErrorDescription: "Invalid redirect URI",
@@ -322,7 +316,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		UserID:                tokenData.UserID,
 		GrantID:               tokenData.GrantID,
 		Scope:                 tokenData.Scope,
-		ExpiresAt:             time.Now().Add(time.Duration(3600) * time.Second),
+		ExpiresAt:             time.Now().Add(3600 * time.Second),
 		RefreshTokenExpiresAt: refreshTokenExpiresAt,
 		CreatedAt:             time.Now(),
 	}
