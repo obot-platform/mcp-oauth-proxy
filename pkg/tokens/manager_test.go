@@ -80,14 +80,14 @@ func TestTokenManager(t *testing.T) {
 
 		// Test with valid token but revoked
 		validToken := "user123:grant456:access_token_123"
-		expiredTime := time.Now().Add(-1 * time.Hour)
+		expiredTime := time.Now().Add(-time.Hour)
 		mockDB.tokens[validToken] = &types.TokenData{
 			AccessToken: validToken,
 			ClientID:    "test_client",
 			UserID:      "user123",
 			GrantID:     "grant456",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     true,
 			RevokedAt:   &expiredTime,
@@ -105,7 +105,7 @@ func TestTokenManager(t *testing.T) {
 			UserID:      "user123",
 			GrantID:     "grant456",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(-1 * time.Hour), // Expired
+			ExpiresAt:   time.Now().Add(-time.Hour), // Expired
 			CreatedAt:   time.Now().Add(-2 * time.Hour),
 			Revoked:     false,
 		}
@@ -122,7 +122,7 @@ func TestTokenManager(t *testing.T) {
 			UserID:      "user123",
 			GrantID:     "missing_grant",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     false,
 		}
@@ -139,7 +139,7 @@ func TestTokenManager(t *testing.T) {
 			UserID:      "user123",
 			GrantID:     "valid_grant",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     false,
 		}
@@ -179,7 +179,7 @@ func TestTokenManager(t *testing.T) {
 			UserID:      "user123",
 			GrantID:     "valid_grant",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     false,
 		}
@@ -205,7 +205,7 @@ func TestTokenManager(t *testing.T) {
 
 // TestTokenClaims tests the TokenClaims struct
 func TestTokenClaims(t *testing.T) {
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := time.Now().Add(time.Hour)
 	props := map[string]any{
 		"email": "test@example.com",
 		"name":  "Test User",
@@ -225,7 +225,7 @@ func TestTokenClaims(t *testing.T) {
 
 // TestTokenInfo tests the TokenInfo struct
 func TestTokenInfo(t *testing.T) {
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := time.Now().Add(time.Hour)
 	props := map[string]any{
 		"email": "test@example.com",
 		"name":  "Test User",
@@ -275,7 +275,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			UserID:      "user123",
 			GrantID:     "grant456",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     false,
 		}
@@ -304,7 +304,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 			UserID:      "user123",
 			GrantID:     "grant456",
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     false,
 		}
@@ -340,7 +340,7 @@ func TestConcurrentTokenValidation(t *testing.T) {
 			UserID:      fmt.Sprintf("user%d", i),
 			GrantID:     fmt.Sprintf("grant%d", i),
 			Scope:       "read write",
-			ExpiresAt:   time.Now().Add(1 * time.Hour),
+			ExpiresAt:   time.Now().Add(time.Hour),
 			CreatedAt:   time.Now(),
 			Revoked:     false,
 		}

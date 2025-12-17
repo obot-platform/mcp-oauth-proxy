@@ -1,6 +1,7 @@
 package tokens
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -72,10 +73,15 @@ func (tm *TokenManager) validateAccessToken(tokenString string) (*TokenInfo, err
 			expTime = exp.Time
 		}
 
+		info, _ := json.Marshal(map[string]any{
+			"sub": sub,
+		})
+
 		return &TokenInfo{
 			UserID: sub,
 			Props: map[string]any{
 				"access_token": tokenString,
+				"info":         string(info),
 			},
 			ExpiresAt: expTime,
 		}, nil

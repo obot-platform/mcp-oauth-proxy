@@ -11,7 +11,6 @@ import (
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/encryption"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/handlerutils"
-	"github.com/obot-platform/mcp-oauth-proxy/pkg/mcpui"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/providers"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
@@ -25,13 +24,13 @@ type Store interface {
 }
 
 type Handler struct {
-	db            Store
-	provider      providers.Provider
-	encryptionKey []byte
-	clientID      string
-	clientSecret  string
-	mcpUIManager  MCPUIManager
-	routePrefix   string
+	db               Store
+	provider         providers.Provider
+	encryptionKey    []byte
+	clientID         string
+	clientSecret     string
+	routePrefix      string
+	cookieNamePrefix string
 }
 
 // MCPUIManager interface for generating JWT tokens
@@ -39,15 +38,15 @@ type MCPUIManager interface {
 	GenerateMCPUICodeForDownstream(bearerToken, refreshToken string) (string, error)
 }
 
-func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret, routePrefix string, mcpUIManager MCPUIManager) http.Handler {
+func NewHandler(db Store, provider providers.Provider, encryptionKey []byte, clientID, clientSecret, routePrefix, cookieNamePrefix string) http.Handler {
 	return &Handler{
-		db:            db,
-		provider:      provider,
-		encryptionKey: encryptionKey,
-		clientID:      clientID,
-		clientSecret:  clientSecret,
-		mcpUIManager:  mcpUIManager,
-		routePrefix:   routePrefix,
+		db:               db,
+		provider:         provider,
+		encryptionKey:    encryptionKey,
+		clientID:         clientID,
+		clientSecret:     clientSecret,
+		routePrefix:      routePrefix,
+		cookieNamePrefix: cookieNamePrefix,
 	}
 }
 
@@ -71,32 +70,43 @@ func getStringFromMap(data map[string]any, key string) string {
 	return ""
 }
 
-// setMCPUISessionCookies sets secure HttpOnly session cookies for MCP UI authentication
-func (p *Handler) setMCPUISessionCookies(w http.ResponseWriter, r *http.Request, accessToken, refreshToken string) {
-	// Determine if request is secure
-	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+// isSecureRequest determines if the request is over HTTPS
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
 
-	// Set access token cookie (1 hour)
-	http.SetCookie(w, &http.Cookie{
-		Name:     mcpui.MCPUICookieName,
-		Value:    accessToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   3600, // 1 hour
-	})
+// setEncryptedCookie sets an encrypted cookie with security attributes
+func (p *Handler) setEncryptedCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) error {
+	encryptedValue, err := encryption.EncryptCookie(p.encryptionKey, value)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt cookie: %w", err)
+	}
 
-	// Set refresh token cookie (30 days)
-	http.SetCookie(w, &http.Cookie{
-		Name:     mcpui.MCPUIRefreshCookieName,
-		Value:    refreshToken,
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    encryptedValue,
 		Path:     "/",
+		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   30 * 24 * 3600, // 30 days
-	})
+		Secure:   isSecureRequest(r),
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	http.SetCookie(w, cookie)
+	return nil
+}
+
+// isValidRelativePath validates that a redirect path is relative and safe
+func isValidRelativePath(path string) bool {
+	// Must start with / and not be a protocol-relative URL
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return false
+	}
+	// No backslashes (Windows path confusion)
+	if strings.Contains(path, "\\") {
+		return false
+	}
+	return true
 }
 
 func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -263,27 +273,36 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rdValue := getStringFromMap(authData, "rd"); rdValue != "" {
-		// This is an MCP UI flow - you should be able to issue session cookies
-		log.Printf("🔄 Processing MCP UI OAuth callback")
+		// Validate redirect path for security
+		if !isValidRelativePath(rdValue) {
+			log.Printf("Invalid redirect path: %s", rdValue)
+			handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
+				Error:            "invalid_request",
+				ErrorDescription: "Invalid redirect path",
+			})
+			return
+		}
 
+		// This is a UI flow - generate internal tokens and set session cookies
 		// Generate internal application tokens (separate from OAuth provider tokens)
 		accessTokenSecret := encryption.GenerateRandomString(32)
 		accessToken := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, accessTokenSecret)
 
-		mcpUIRefreshTokenSecret := encryption.GenerateRandomString(32)
-		mcpUIRefreshToken := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, mcpUIRefreshTokenSecret)
+		refreshTokenSecret := encryption.GenerateRandomString(32)
+		refreshToken := fmt.Sprintf("%s:%s:%s", userInfo.ID, grantID, refreshTokenSecret)
 
 		// Store internal tokens in database
 		tokenData := &types.TokenData{
-			AccessToken:  accessToken,
-			RefreshToken: mcpUIRefreshToken,
-			ClientID:     authReq.ClientID,
-			UserID:       userInfo.ID,
-			GrantID:      grantID,
-			Scope:        authReq.Scope,
-			ExpiresAt:    time.Now().Add(1 * time.Hour), // 1 hour for access token
-			CreatedAt:    time.Now(),
-			Revoked:      false,
+			AccessToken:           accessToken,
+			RefreshToken:          refreshToken,
+			ClientID:              authReq.ClientID,
+			UserID:                userInfo.ID,
+			GrantID:               grantID,
+			Scope:                 authReq.Scope,
+			ExpiresAt:             time.Now().Add(time.Hour),        // 1 hour for access token
+			RefreshTokenExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days for refresh token
+			CreatedAt:             time.Now(),
+			Revoked:               false,
 		}
 
 		if err := p.db.StoreToken(tokenData); err != nil {
@@ -294,14 +313,33 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Set secure HttpOnly session cookies
-		p.setMCPUISessionCookies(w, r, accessToken, mcpUIRefreshToken)
+		// Set encrypted cookies
+		accessCookieName := p.cookieNamePrefix + types.AccessTokenCookieName
+		refreshCookieName := p.cookieNamePrefix + types.RefreshTokenCookieName
 
-		// Redirect to success page with original path as parameter
-		baseURL := handlerutils.GetBaseURL(r)
-		successURL := fmt.Sprintf("%s%s/auth/mcp-ui/success?rd=%s", baseURL, p.routePrefix, url.QueryEscape(rdValue))
+		// Access token cookie (1 hour)
+		if err := p.setEncryptedCookie(w, r, accessCookieName, accessToken, 3600); err != nil {
+			log.Printf("Failed to set access token cookie: %v", err)
+			handlerutils.JSON(w, http.StatusInternalServerError, types.OAuthError{
+				Error:            "server_error",
+				ErrorDescription: "Failed to set authentication cookies",
+			})
+			return
+		}
 
-		http.Redirect(w, r, successURL, http.StatusFound)
+		// Refresh token cookie (30 days)
+		if err := p.setEncryptedCookie(w, r, refreshCookieName, refreshToken, 30*24*3600); err != nil {
+			log.Printf("Failed to set refresh token cookie: %v", err)
+			handlerutils.JSON(w, http.StatusInternalServerError, types.OAuthError{
+				Error:            "server_error",
+				ErrorDescription: "Failed to set authentication cookies",
+			})
+			return
+		}
+
+		// Redirect to original URL (rdValue is already a relative path)
+		redirectURL := handlerutils.GetBaseURL(r) + rdValue
+		http.Redirect(w, r, redirectURL, http.StatusFound)
 		return
 	}
 
@@ -325,6 +363,5 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parsedURL.RawQuery = query.Encode()
 
 	// Redirect back to the client
-	w.Header().Set("Location", parsedURL.String())
-	w.WriteHeader(http.StatusFound)
+	http.Redirect(w, r, parsedURL.String(), http.StatusFound)
 }

@@ -209,3 +209,15 @@ func DecryptString(encryptionKey []byte, encryptedData string) (string, error) {
 
 	return string(plaintext), nil
 }
+
+// EncryptCookie encrypts a cookie value using AES-256-GCM
+// Returns a base64-encoded encrypted string suitable for cookie storage
+func EncryptCookie(encryptionKey []byte, value string) (string, error) {
+	return EncryptString(encryptionKey, value)
+}
+
+// DecryptCookie decrypts an encrypted cookie value using AES-256-GCM
+// Takes a base64-encoded encrypted string and returns the plaintext
+func DecryptCookie(encryptionKey []byte, encryptedValue string) (string, error) {
+	return DecryptString(encryptionKey, encryptedValue)
+}
