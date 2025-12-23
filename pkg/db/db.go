@@ -98,9 +98,10 @@ func (d *Store) GetClient(clientID string) (*types.ClientInfo, error) {
 	return &client, nil
 }
 
-// StoreClient stores a new client
+// StoreClient stores a new client or updates an existing one
 func (d *Store) StoreClient(client *types.ClientInfo) error {
-	return d.db.Create(client).Error
+	// Use Save which does an upsert (insert or update)
+	return d.db.Save(client).Error
 }
 
 // StoreGrant stores a new grant
