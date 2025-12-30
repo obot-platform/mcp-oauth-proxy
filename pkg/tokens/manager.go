@@ -142,18 +142,18 @@ func (tm *TokenManager) validateAccessToken(tokenString string) (*TokenInfo, err
 
 // GetTokenInfo extracts user information from a valid token
 func (tm *TokenManager) GetTokenInfo(tokenString string) (*TokenInfo, error) {
-	return tm.GetTokenInfoWithContext(context.Background(), tokenString, "", "")
+	return tm.GetTokenInfoWithContext(context.Background(), tokenString, "")
 }
 
 // GetTokenInfoWithContext extracts user information from a valid token with context support.
-// For API keys, mcpServerID and mcpServerInstanceID can be provided for scoped authorization.
-func (tm *TokenManager) GetTokenInfoWithContext(ctx context.Context, tokenString, mcpServerID, mcpServerInstanceID string) (*TokenInfo, error) {
+// For API keys, mcpID can be provided for scoped authorization.
+func (tm *TokenManager) GetTokenInfoWithContext(ctx context.Context, tokenString, mcpID string) (*TokenInfo, error) {
 	// Check if this is an API key first
 	if IsAPIKey(tokenString) {
 		if tm.apiKeyValidator == nil {
 			return nil, fmt.Errorf("API key authentication not configured")
 		}
-		return tm.apiKeyValidator.ValidateAPIKey(ctx, tokenString, mcpServerID, mcpServerInstanceID)
+		return tm.apiKeyValidator.ValidateAPIKey(ctx, tokenString, mcpID)
 	}
 
 	// Fall back to existing JWT/simple token validation

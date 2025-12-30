@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -106,12 +107,13 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 		}
 
 		// Check if this is an API key - use context-aware validation
-		var tokenInfo *tokens.TokenInfo
-		var err error
+		var (
+			tokenInfo *tokens.TokenInfo
+			err       error
+		)
 		if tokens.IsAPIKey(token) {
 			// API keys are validated against the webhook on every request (no caching)
-			// Pass empty server IDs for now - basic authentication without scoped authorization
-			tokenInfo, err = p.tokenManager.GetTokenInfoWithContext(r.Context(), token, "", "")
+			tokenInfo, err = p.tokenManager.GetTokenInfoWithContext(r.Context(), token, os.Getenv("MCP_SERVER_ID"))
 			if err != nil {
 				p.sendUnauthorizedResponse(w, r, fmt.Sprintf("Invalid or expired API key: %v", err))
 				return

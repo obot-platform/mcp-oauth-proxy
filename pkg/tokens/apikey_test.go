@@ -67,18 +67,16 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 	tests := []struct {
 		name           string
 		apiKey         string
-		mcpServerID    string
-		mcpInstanceID  string
+		mcpID          string
 		serverResponse *types.APIKeyAuthResponse
 		serverStatus   int
 		expectError    bool
 		expectedUserID string
 	}{
 		{
-			name:          "successful authentication and authorization",
-			apiKey:        "ok1-1-2-secret",
-			mcpServerID:   "server-123",
-			mcpInstanceID: "instance-456",
+			name:   "successful authentication and authorization",
+			apiKey: "ok1-1-2-secret",
+			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
 				Authenticated: true,
 				Authorized:    true,
@@ -90,10 +88,9 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			expectedUserID: "42",
 		},
 		{
-			name:          "authentication failed",
-			apiKey:        "ok1-invalid-key",
-			mcpServerID:   "server-123",
-			mcpInstanceID: "instance-456",
+			name:   "authentication failed",
+			apiKey: "ok1-invalid-key",
+			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
 				Authenticated: false,
 				Authorized:    false,
@@ -103,10 +100,9 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			expectError:  true,
 		},
 		{
-			name:          "authenticated but not authorized",
-			apiKey:        "ok1-1-2-secret",
-			mcpServerID:   "server-123",
-			mcpInstanceID: "instance-456",
+			name:   "authenticated but not authorized",
+			apiKey: "ok1-1-2-secret",
+			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
 				Authenticated: true,
 				Authorized:    false,
@@ -116,10 +112,9 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			expectError:  true,
 		},
 		{
-			name:          "server error",
-			apiKey:        "ok1-1-2-secret",
-			mcpServerID:   "server-123",
-			mcpInstanceID: "instance-456",
+			name:   "server error",
+			apiKey: "ok1-1-2-secret",
+			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
 				Authenticated: false,
 				Authorized:    false,
@@ -150,11 +145,8 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 					t.Errorf("failed to decode request body: %v", err)
 				}
-				if reqBody.MCPServerID != tt.mcpServerID {
-					t.Errorf("expected MCPServerID %q, got %q", tt.mcpServerID, reqBody.MCPServerID)
-				}
-				if reqBody.MCPServerInstanceID != tt.mcpInstanceID {
-					t.Errorf("expected MCPServerInstanceID %q, got %q", tt.mcpInstanceID, reqBody.MCPServerInstanceID)
+				if reqBody.MCPID != tt.mcpID {
+					t.Errorf("expected MCPID %q, got %q", tt.mcpID, reqBody.MCPID)
 				}
 
 				w.WriteHeader(tt.serverStatus)
@@ -168,7 +160,7 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			validator := NewAPIKeyValidator(server.URL)
 
 			// Validate the API key
-			tokenInfo, err := validator.ValidateAPIKey(context.Background(), tt.apiKey, tt.mcpServerID, tt.mcpInstanceID)
+			tokenInfo, err := validator.ValidateAPIKey(context.Background(), tt.apiKey, tt.mcpID)
 
 			if tt.expectError {
 				if err == nil {
@@ -200,7 +192,7 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 func TestAPIKeyValidator_EmptyAuthURL(t *testing.T) {
 	validator := NewAPIKeyValidator("")
 
-	_, err := validator.ValidateAPIKey(context.Background(), "ok1-test", "", "")
+	_, err := validator.ValidateAPIKey(context.Background(), "ok1-test", "")
 	if err == nil {
 		t.Error("expected error for empty auth URL, got none")
 	}

@@ -40,15 +40,14 @@ func NewAPIKeyValidator(authURL string) *APIKeyValidator {
 
 // ValidateAPIKey validates an API key by calling the authentication webhook.
 // Returns TokenInfo on success, or an error if authentication/authorization fails.
-func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpServerID, mcpServerInstanceID string) (*TokenInfo, error) {
+func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID string) (*TokenInfo, error) {
 	if v.authURL == "" {
 		return nil, fmt.Errorf("API key auth URL not configured")
 	}
 
 	// Build request body
 	reqBody := types.APIKeyAuthRequest{
-		MCPServerID:         mcpServerID,
-		MCPServerInstanceID: mcpServerInstanceID,
+		MCPID: mcpID,
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {

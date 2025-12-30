@@ -2,8 +2,7 @@ package types
 
 // APIKeyAuthRequest is the request body sent to the API key authentication webhook.
 type APIKeyAuthRequest struct {
-	MCPServerID         string `json:"mcpServerId,omitempty"`
-	MCPServerInstanceID string `json:"mcpServerInstanceId,omitempty"`
+	MCPID string `json:"mcpId,omitempty"`
 }
 
 // APIKeyAuthResponse is the response from the API key authentication webhook.
