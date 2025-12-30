@@ -24,6 +24,7 @@ type Config struct {
 	RoutePrefix       string
 	CookieNamePrefix  string
 	MCPPaths          []string
+	APIKeyAuthURL     string // URL for API key authentication webhook
 }
 
 // TokenData represents stored token data for OAuth 2.1 compliance

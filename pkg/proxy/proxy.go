@@ -109,8 +109,8 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 		provider = "generic"
 	}
 
-	// Initialize token manager
-	tokenManager, err := tokens.NewTokenManagerWithJWKSURL(db, config.OAuthJWKSURL)
+	// Initialize token manager with JWKS and API key auth support
+	tokenManager, err := tokens.NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, config.OAuthJWKSURL, config.APIKeyAuthURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token manager: %w", err)
 	}

@@ -1,6 +1,7 @@
 package tokens
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -13,8 +14,9 @@ import (
 
 // TokenManager handles token generation and validation
 type TokenManager struct {
-	db      Database
-	keyFunc keyfunc.Keyfunc
+	db              Database
+	keyFunc         keyfunc.Keyfunc
+	apiKeyValidator *APIKeyValidator
 }
 
 // Database interface for token operations
@@ -25,11 +27,16 @@ type Database interface {
 
 // NewTokenManager creates a new token manager
 func NewTokenManager(db Database) (*TokenManager, error) {
-	return NewTokenManagerWithJWKSURL(db, "")
+	return NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, "", "")
 }
 
 // NewTokenManagerWithJWKSURL creates a new token manager that will also trust JWT tokens from the specified URL.
 func NewTokenManagerWithJWKSURL(db Database, jwksURL string) (*TokenManager, error) {
+	return NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, jwksURL, "")
+}
+
+// NewTokenManagerWithJWKSURLAndAPIKeyAuth creates a new token manager with JWT and API key support.
+func NewTokenManagerWithJWKSURLAndAPIKeyAuth(db Database, jwksURL, apiKeyAuthURL string) (*TokenManager, error) {
 	var keyFunc keyfunc.Keyfunc
 	if jwksURL != "" {
 		var err error
@@ -39,9 +46,15 @@ func NewTokenManagerWithJWKSURL(db Database, jwksURL string) (*TokenManager, err
 		}
 	}
 
+	var apiKeyValidator *APIKeyValidator
+	if apiKeyAuthURL != "" {
+		apiKeyValidator = NewAPIKeyValidator(apiKeyAuthURL)
+	}
+
 	return &TokenManager{
-		db:      db,
-		keyFunc: keyFunc,
+		db:              db,
+		keyFunc:         keyFunc,
+		apiKeyValidator: apiKeyValidator,
 	}, nil
 }
 
@@ -129,6 +142,21 @@ func (tm *TokenManager) validateAccessToken(tokenString string) (*TokenInfo, err
 
 // GetTokenInfo extracts user information from a valid token
 func (tm *TokenManager) GetTokenInfo(tokenString string) (*TokenInfo, error) {
+	return tm.GetTokenInfoWithContext(context.Background(), tokenString, "", "")
+}
+
+// GetTokenInfoWithContext extracts user information from a valid token with context support.
+// For API keys, mcpServerID and mcpServerInstanceID can be provided for scoped authorization.
+func (tm *TokenManager) GetTokenInfoWithContext(ctx context.Context, tokenString, mcpServerID, mcpServerInstanceID string) (*TokenInfo, error) {
+	// Check if this is an API key first
+	if IsAPIKey(tokenString) {
+		if tm.apiKeyValidator == nil {
+			return nil, fmt.Errorf("API key authentication not configured")
+		}
+		return tm.apiKeyValidator.ValidateAPIKey(ctx, tokenString, mcpServerID, mcpServerInstanceID)
+	}
+
+	// Fall back to existing JWT/simple token validation
 	claims, err := tm.validateAccessToken(tokenString)
 	if err != nil {
 		return nil, err
