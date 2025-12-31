@@ -68,7 +68,9 @@ func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to call auth webhook: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Parse response
 	var authResp types.APIKeyAuthResponse
