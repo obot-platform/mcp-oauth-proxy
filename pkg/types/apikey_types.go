@@ -7,9 +7,11 @@ type APIKeyAuthRequest struct {
 
 // APIKeyAuthResponse is the response from the API key authentication webhook.
 type APIKeyAuthResponse struct {
-	Authenticated bool   `json:"authenticated"`
-	Authorized    bool   `json:"authorized"`
-	UserID        uint   `json:"userId,omitempty"`
-	Username      string `json:"username,omitempty"`
-	Error         string `json:"error,omitempty"`
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason,omitempty"`
+
+	Subject           string `json:"sub,omitempty"`
+	Name              string `json:"name,omitempty"`
+	PreferredUsername string `json:"preferred_username,omitempty"`
+	Email             string `json:"email,omitempty"`
 }

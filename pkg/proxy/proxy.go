@@ -110,7 +110,7 @@ func NewOAuthProxy(config *types.Config) (*OAuthProxy, error) {
 	}
 
 	// Initialize token manager with JWKS and API key auth support
-	tokenManager, err := tokens.NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, config.OAuthJWKSURL, config.APIKeyAuthURL)
+	tokenManager, err := tokens.NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, config.OAuthJWKSURL, config.APIKeyAuthWebhookURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token manager: %w", err)
 	}
@@ -210,7 +210,7 @@ func (p *OAuthProxy) SetupRoutes(mux *http.ServeMux, next http.Handler) {
 	tokenHandler := token.NewHandler(p.db)
 	callbackHandler := callback.NewHandler(p.db, provider, p.encryptionKey, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.RoutePrefix, p.config.CookieNamePrefix)
 	revokeHandler := revoke.NewHandler(p.db)
-	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey, p.db, provider, p.config.RoutePrefix, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.CookieNamePrefix, p.metadata.ScopesSupported, p.config.MCPPaths)
+	tokenValidator := validate.NewTokenValidator(p.tokenManager, p.encryptionKey, p.db, provider, p.config.RoutePrefix, p.GetOAuthClientID(), p.GetOAuthClientSecret(), p.config.CookieNamePrefix, p.config.MCPServerID, p.metadata.ScopesSupported, p.config.MCPPaths)
 	successHandler := success.NewHandler()
 
 	// Get route prefix from config

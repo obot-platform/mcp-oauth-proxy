@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -28,6 +27,7 @@ type TokenValidator struct {
 	clientSecret           string // OAuth client secret
 	accessTokenCookieName  string
 	refreshTokenCookieName string
+	mcpServerID            string
 	scopesSupported        []string // Supported OAuth scopes
 	mcpPaths               []string
 }
@@ -41,7 +41,7 @@ type TokenStore interface {
 	StoreAuthRequest(key string, data map[string]any) error
 }
 
-func NewTokenValidator(tokenManager *tokens.TokenManager, encryptionKey []byte, db TokenStore, provider providers.Provider, routePrefix, clientID, clientSecret, cookieNamePrefix string, scopesSupported, mcpPaths []string) *TokenValidator {
+func NewTokenValidator(tokenManager *tokens.TokenManager, encryptionKey []byte, db TokenStore, provider providers.Provider, routePrefix, clientID, clientSecret, cookieNamePrefix, mcpServerID string, scopesSupported, mcpPaths []string) *TokenValidator {
 	return &TokenValidator{
 		tokenManager:           tokenManager,
 		encryptionKey:          encryptionKey,
@@ -52,6 +52,7 @@ func NewTokenValidator(tokenManager *tokens.TokenManager, encryptionKey []byte, 
 		clientSecret:           clientSecret,
 		accessTokenCookieName:  cookieNamePrefix + types.AccessTokenCookieName,
 		refreshTokenCookieName: cookieNamePrefix + types.RefreshTokenCookieName,
+		mcpServerID:            mcpServerID,
 		scopesSupported:        scopesSupported,
 		mcpPaths:               mcpPaths,
 	}
@@ -113,7 +114,7 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 		)
 		if tokens.IsAPIKey(token) {
 			// API keys are validated against the webhook on every request (no caching)
-			tokenInfo, err = p.tokenManager.GetTokenInfoWithContext(r.Context(), token, os.Getenv("MCP_SERVER_ID"))
+			tokenInfo, err = p.tokenManager.GetTokenInfoWithContext(r.Context(), token, p.mcpServerID)
 			if err != nil {
 				p.sendUnauthorizedResponse(w, r, fmt.Sprintf("Invalid or expired API key: %v", err))
 				return

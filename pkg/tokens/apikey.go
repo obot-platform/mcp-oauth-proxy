@@ -45,7 +45,6 @@ func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID stri
 		return nil, fmt.Errorf("API key auth URL not configured")
 	}
 
-	// Build request body
 	reqBody := types.APIKeyAuthRequest{
 		MCPID: mcpID,
 	}
@@ -54,7 +53,6 @@ func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID stri
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.authURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -63,7 +61,6 @@ func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID stri
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	// Make the request
 	resp, err := v.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call auth webhook: %w", err)
@@ -72,37 +69,26 @@ func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID stri
 		_ = resp.Body.Close()
 	}()
 
-	// Parse response
 	var authResp types.APIKeyAuthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if !authResp.Authenticated {
+	if !authResp.Allowed {
 		errMsg := "authentication failed"
-		if authResp.Error != "" {
-			errMsg = authResp.Error
+		if authResp.Reason != "" {
+			errMsg = authResp.Reason
 		}
 		return nil, fmt.Errorf("%s", errMsg)
 	}
 
-	if !authResp.Authorized {
-		errMsg := "authorization failed"
-		if authResp.Error != "" {
-			errMsg = authResp.Error
-		}
-		return nil, fmt.Errorf("%s", errMsg)
-	}
-
-	// Build user info JSON for props
 	userInfo, _ := json.Marshal(map[string]any{
-		"sub":      fmt.Sprintf("%d", authResp.UserID),
-		"username": authResp.Username,
+		"sub":      fmt.Sprintf("%d", authResp.Subject),
+		"username": authResp.PreferredUsername,
 	})
 
-	// Return token info
 	return &TokenInfo{
-		UserID: fmt.Sprintf("%d", authResp.UserID),
+		UserID: fmt.Sprintf("%d", authResp.Subject),
 		Props: map[string]any{
 			"info":         string(userInfo),
 			"api_key":      true,

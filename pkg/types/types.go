@@ -11,20 +11,21 @@ const (
 
 // Config holds all configuration values for the OAuth proxy
 type Config struct {
-	Port              string
-	DatabaseDSN       string
-	OAuthClientID     string
-	OAuthClientSecret string
-	OAuthAuthorizeURL string
-	OAuthJWKSURL      string
-	ScopesSupported   string
-	EncryptionKey     string
-	MCPServerURL      string
-	Mode              string
-	RoutePrefix       string
-	CookieNamePrefix  string
-	MCPPaths          []string
-	APIKeyAuthURL     string // URL for API key authentication webhook
+	Port                 string
+	DatabaseDSN          string
+	OAuthClientID        string
+	OAuthClientSecret    string
+	OAuthAuthorizeURL    string
+	OAuthJWKSURL         string
+	ScopesSupported      string
+	EncryptionKey        string
+	MCPServerURL         string
+	Mode                 string
+	RoutePrefix          string
+	CookieNamePrefix     string
+	MCPPaths             []string
+	APIKeyAuthWebhookURL string
+	MCPServerID          string
 }
 
 // TokenData represents stored token data for OAuth 2.1 compliance
