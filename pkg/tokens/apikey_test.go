@@ -10,59 +10,6 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
 
-func TestIsAPIKey(t *testing.T) {
-	tests := []struct {
-		name     string
-		token    string
-		expected bool
-	}{
-		{
-			name:     "valid API key prefix",
-			token:    "ok1-123-456-secret",
-			expected: true,
-		},
-		{
-			name:     "API key with just prefix",
-			token:    "ok1-",
-			expected: true,
-		},
-		{
-			name:     "JWT token",
-			token:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
-			expected: false,
-		},
-		{
-			name:     "simple token format",
-			token:    "user123:grant456:secret789",
-			expected: false,
-		},
-		{
-			name:     "empty token",
-			token:    "",
-			expected: false,
-		},
-		{
-			name:     "similar but different prefix",
-			token:    "ok2-123-456-secret",
-			expected: false,
-		},
-		{
-			name:     "prefix in middle of token",
-			token:    "someprefix-ok1-123",
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsAPIKey(tt.token)
-			if result != tt.expected {
-				t.Errorf("IsAPIKey(%q) = %v, want %v", tt.token, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -78,10 +25,9 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			apiKey: "ok1-1-2-secret",
 			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
-				Authenticated: true,
-				Authorized:    true,
-				UserID:        42,
-				Username:      "testuser",
+				Allowed:           true,
+				Subject:           "42",
+				PreferredUsername: "testuser",
 			},
 			serverStatus:   http.StatusOK,
 			expectError:    false,
@@ -92,21 +38,19 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			apiKey: "ok1-invalid-key",
 			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
-				Authenticated: false,
-				Authorized:    false,
-				Error:         "invalid API key",
+				Allowed: false,
+				Reason:  "invalid API key",
 			},
 			serverStatus: http.StatusOK,
 			expectError:  true,
 		},
 		{
-			name:   "authenticated but not authorized",
+			name:   "not authorized",
 			apiKey: "ok1-1-2-secret",
 			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
-				Authenticated: true,
-				Authorized:    false,
-				Error:         "access denied to this MCP server",
+				Allowed: false,
+				Reason:  "access denied to this MCP server",
 			},
 			serverStatus: http.StatusOK,
 			expectError:  true,
@@ -116,9 +60,8 @@ func TestAPIKeyValidator_ValidateAPIKey(t *testing.T) {
 			apiKey: "ok1-1-2-secret",
 			mcpID:  "server-123",
 			serverResponse: &types.APIKeyAuthResponse{
-				Authenticated: false,
-				Authorized:    false,
-				Error:         "internal error",
+				Allowed: false,
+				Reason:  "internal error",
 			},
 			serverStatus: http.StatusInternalServerError,
 			expectError:  true,

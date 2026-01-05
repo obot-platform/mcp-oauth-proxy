@@ -107,46 +107,33 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 			fromCookie = false
 		}
 
-		// Check if this is an API key - use context-aware validation
-		var (
-			tokenInfo *tokens.TokenInfo
-			err       error
-		)
-		if tokens.IsAPIKey(token) {
-			// API keys are validated against the webhook on every request (no caching)
-			tokenInfo, err = p.tokenManager.GetTokenInfoWithContext(r.Context(), token, p.mcpServerID)
-			if err != nil {
-				p.sendUnauthorizedResponse(w, r, fmt.Sprintf("Invalid or expired API key: %v", err))
-				return
-			}
-		} else {
-			// Existing JWT/simple token validation
-			tokenInfo, err = p.tokenManager.GetTokenInfo(token)
-			if err != nil {
-				p.sendUnauthorizedResponse(w, r, "Invalid or expired token")
-				return
-			}
+		// Validate token (handles both API keys and JWT/simple tokens)
+		tokenInfo, err := p.tokenManager.GetTokenInfoWithContext(r.Context(), token, p.mcpServerID)
+		if err != nil {
+			p.sendUnauthorizedResponse(w, r, fmt.Sprintf("Invalid or expired token: %v", err))
+			return
+		}
 
-			// Check if token is within 15 minutes of expiring and attempt refresh if from cookie
-			// Note: API keys don't use cookies or refresh tokens
-			if fromCookie && time.Until(tokenInfo.ExpiresAt) < 15*time.Minute {
-				newToken, refreshErr := p.refreshAccessToken(w, r)
-				if refreshErr != nil {
-					// If token is already expired, refresh is required
-					if time.Now().After(tokenInfo.ExpiresAt) {
-						p.sendUnauthorizedResponse(w, r, "Token expired and refresh failed")
-						return
-					}
-					// Token not yet expired, log warning and continue with current token
-					fmt.Printf("Token refresh failed but token still valid, continuing: %v\n", refreshErr)
-				} else {
-					// Refresh succeeded, use new token and get updated token info
-					token = newToken
-					tokenInfo, err = p.tokenManager.GetTokenInfo(token)
-					if err != nil {
-						p.sendUnauthorizedResponse(w, r, "Failed to validate refreshed token")
-						return
-					}
+		// Check if token is within 15 minutes of expiring and attempt refresh if from cookie
+		// Note: API keys don't use cookies or refresh tokens
+		isAPIKey := tokenInfo.Props != nil && tokenInfo.Props["api_key"] == true
+		if !isAPIKey && fromCookie && time.Until(tokenInfo.ExpiresAt) < 15*time.Minute {
+			newToken, refreshErr := p.refreshAccessToken(w, r)
+			if refreshErr != nil {
+				// If token is already expired, refresh is required
+				if time.Now().After(tokenInfo.ExpiresAt) {
+					p.sendUnauthorizedResponse(w, r, "Token expired and refresh failed")
+					return
+				}
+				// Token not yet expired, log warning and continue with current token
+				fmt.Printf("Token refresh failed but token still valid, continuing: %v\n", refreshErr)
+			} else {
+				// Refresh succeeded, use new token and get updated token info
+				token = newToken
+				tokenInfo, err = p.tokenManager.GetTokenInfoWithContext(r.Context(), token, p.mcpServerID)
+				if err != nil {
+					p.sendUnauthorizedResponse(w, r, "Failed to validate refreshed token")
+					return
 				}
 			}
 		}

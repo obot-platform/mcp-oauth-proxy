@@ -6,21 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
-
-const (
-	// APIKeyPrefix is the prefix that identifies Obot API keys.
-	APIKeyPrefix = "ok1-"
-)
-
-// IsAPIKey checks if the token is an Obot API key (starts with "ok1-").
-func IsAPIKey(token string) bool {
-	return strings.HasPrefix(token, APIKeyPrefix)
-}
 
 // APIKeyValidator validates API keys by calling the authentication webhook.
 type APIKeyValidator struct {
@@ -83,12 +72,12 @@ func (v *APIKeyValidator) ValidateAPIKey(ctx context.Context, apiKey, mcpID stri
 	}
 
 	userInfo, _ := json.Marshal(map[string]any{
-		"sub":      fmt.Sprintf("%d", authResp.Subject),
+		"sub":      authResp.Subject,
 		"username": authResp.PreferredUsername,
 	})
 
 	return &TokenInfo{
-		UserID: fmt.Sprintf("%d", authResp.Subject),
+		UserID: authResp.Subject,
 		Props: map[string]any{
 			"info":         string(userInfo),
 			"api_key":      true,

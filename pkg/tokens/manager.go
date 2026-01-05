@@ -3,6 +3,7 @@ package tokens
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
+
+// ErrInvalidTokenFormat is returned when the token format is not recognized.
+var ErrInvalidTokenFormat = errors.New("invalid token format")
 
 // TokenManager handles token generation and validation
 type TokenManager struct {
@@ -64,13 +68,13 @@ func (tm *TokenManager) validateAccessToken(tokenString string) (*TokenInfo, err
 	parts := strings.Split(tokenString, ":")
 	if len(parts) != 3 {
 		if tm.keyFunc == nil {
-			return nil, fmt.Errorf("invalid token format")
+			return nil, ErrInvalidTokenFormat
 		}
 
 		// If this isn't a token for us, then we should check if it's a JWT token
 		token, err := jwt.Parse(tokenString, tm.keyFunc.Keyfunc)
 		if err != nil {
-			return nil, fmt.Errorf("invalid token format")
+			return nil, ErrInvalidTokenFormat
 		}
 		if !token.Valid {
 			return nil, fmt.Errorf("invalid token")
@@ -148,17 +152,16 @@ func (tm *TokenManager) GetTokenInfo(tokenString string) (*TokenInfo, error) {
 // GetTokenInfoWithContext extracts user information from a valid token with context support.
 // For API keys, mcpID can be provided for scoped authorization.
 func (tm *TokenManager) GetTokenInfoWithContext(ctx context.Context, tokenString, mcpID string) (*TokenInfo, error) {
-	// Check if this is an API key first
-	if IsAPIKey(tokenString) {
-		if tm.apiKeyValidator == nil {
-			return nil, fmt.Errorf("API key authentication not configured")
-		}
-		return tm.apiKeyValidator.ValidateAPIKey(ctx, tokenString, mcpID)
-	}
-
-	// Fall back to existing JWT/simple token validation
+	// Try JWT/simple token validation first
 	claims, err := tm.validateAccessToken(tokenString)
 	if err != nil {
+		// If token format is not recognized, try API key validation
+		if errors.Is(err, ErrInvalidTokenFormat) {
+			if tm.apiKeyValidator == nil {
+				return nil, fmt.Errorf("API key authentication not configured")
+			}
+			return tm.apiKeyValidator.ValidateAPIKey(ctx, tokenString, mcpID)
+		}
 		return nil, err
 	}
 
