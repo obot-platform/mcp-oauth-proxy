@@ -158,7 +158,7 @@ func (tm *TokenManager) GetTokenInfoWithContext(ctx context.Context, tokenString
 		// If token format is not recognized, try API key validation
 		if errors.Is(err, ErrInvalidTokenFormat) {
 			if tm.apiKeyValidator == nil {
-				return nil, fmt.Errorf("API key authentication not configured")
+				return nil, err // Return the original error
 			}
 			return tm.apiKeyValidator.ValidateAPIKey(ctx, tokenString, mcpID)
 		}

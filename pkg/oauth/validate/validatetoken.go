@@ -115,9 +115,7 @@ func (p *TokenValidator) WithTokenValidation(next http.HandlerFunc) http.Handler
 		}
 
 		// Check if token is within 15 minutes of expiring and attempt refresh if from cookie
-		// Note: API keys don't use cookies or refresh tokens
-		isAPIKey := tokenInfo.Props != nil && tokenInfo.Props["api_key"] == true
-		if !isAPIKey && fromCookie && time.Until(tokenInfo.ExpiresAt) < 15*time.Minute {
+		if fromCookie && time.Until(tokenInfo.ExpiresAt) < 15*time.Minute {
 			newToken, refreshErr := p.refreshAccessToken(w, r)
 			if refreshErr != nil {
 				// If token is already expired, refresh is required
