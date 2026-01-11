@@ -142,7 +142,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	handlerutils.JSON(w, http.StatusOK, response)
+	handlerutils.JSON(w, http.StatusCreated, response)
 }
 
 func (p *Handler) validateClientMetadata(metadata map[string]any) (*types.ClientInfo, error) {
