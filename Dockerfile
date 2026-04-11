@@ -27,8 +27,8 @@ RUN CGO_ENABLED=0 go build \
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates tzdata
+# Install ca-certificates for HTTPS requests and apply security patches
+RUN apk --no-cache add ca-certificates tzdata && apk upgrade --no-cache
 
 # Create non-root user
 RUN addgroup -g 1001 -S oauth && \
