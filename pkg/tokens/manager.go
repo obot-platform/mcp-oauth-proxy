@@ -18,9 +18,11 @@ var ErrInvalidTokenFormat = errors.New("invalid token format")
 
 // TokenManager handles token generation and validation
 type TokenManager struct {
-	db              Database
-	keyFunc         keyfunc.Keyfunc
-	apiKeyValidator *APIKeyValidator
+	db               Database
+	keyFunc          keyfunc.Keyfunc
+	trustedIssuer    string
+	trustedAudiences []string
+	apiKeyValidator  *APIKeyValidator
 }
 
 // Database interface for token operations
@@ -31,16 +33,16 @@ type Database interface {
 
 // NewTokenManager creates a new token manager
 func NewTokenManager(db Database) (*TokenManager, error) {
-	return NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, "", "")
+	return NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, "", "", "", nil)
 }
 
 // NewTokenManagerWithJWKSURL creates a new token manager that will also trust JWT tokens from the specified URL.
-func NewTokenManagerWithJWKSURL(db Database, jwksURL string) (*TokenManager, error) {
-	return NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, jwksURL, "")
+func NewTokenManagerWithJWKSURL(db Database, jwksURL, trustedIssuer string, trustedAudiences []string) (*TokenManager, error) {
+	return NewTokenManagerWithJWKSURLAndAPIKeyAuth(db, "", jwksURL, trustedIssuer, trustedAudiences)
 }
 
 // NewTokenManagerWithJWKSURLAndAPIKeyAuth creates a new token manager with JWT and API key support.
-func NewTokenManagerWithJWKSURLAndAPIKeyAuth(db Database, jwksURL, apiKeyAuthURL string) (*TokenManager, error) {
+func NewTokenManagerWithJWKSURLAndAPIKeyAuth(db Database, apiKeyAuthURL, jwksURL, trustedIssuer string, trustedAudiences []string) (*TokenManager, error) {
 	var keyFunc keyfunc.Keyfunc
 	if jwksURL != "" {
 		var err error
@@ -56,9 +58,11 @@ func NewTokenManagerWithJWKSURLAndAPIKeyAuth(db Database, jwksURL, apiKeyAuthURL
 	}
 
 	return &TokenManager{
-		db:              db,
-		keyFunc:         keyFunc,
-		apiKeyValidator: apiKeyValidator,
+		db:               db,
+		keyFunc:          keyFunc,
+		trustedIssuer:    trustedIssuer,
+		trustedAudiences: trustedAudiences,
+		apiKeyValidator:  apiKeyValidator,
 	}, nil
 }
 
@@ -72,7 +76,7 @@ func (tm *TokenManager) validateAccessToken(tokenString string) (*TokenInfo, err
 		}
 
 		// If this isn't a token for us, then we should check if it's a JWT token
-		token, err := jwt.Parse(tokenString, tm.keyFunc.Keyfunc)
+		token, err := jwt.Parse(tokenString, tm.keyFunc.Keyfunc, jwt.WithIssuer(tm.trustedIssuer), jwt.WithAudience(tm.trustedAudiences...))
 		if err != nil {
 			return nil, ErrInvalidTokenFormat
 		}
