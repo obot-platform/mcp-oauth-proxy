@@ -17,6 +17,8 @@ type Config struct {
 	OAuthClientSecret    string
 	OAuthAuthorizeURL    string
 	OAuthJWKSURL         string
+	TrustedIssuer        string
+	TrustedAudiences     []string
 	ScopesSupported      string
 	EncryptionKey        string
 	MCPServerURL         string
