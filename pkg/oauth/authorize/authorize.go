@@ -15,6 +15,7 @@ import (
 
 type AuthorizationStore interface {
 	GetClient(clientID string) (*types.ClientInfo, error)
+	StoreClient(client *types.ClientInfo) error
 	StoreAuthRequest(key string, data map[string]any) error
 }
 
@@ -87,14 +88,28 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate client exists
+	// Validate client exists, or auto-register if not found
+	// This handles the case where MCP clients cache their client_id but the server database was reset
 	clientInfo, err := p.db.GetClient(authReq.ClientID)
 	if err != nil || clientInfo == nil {
-		handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
-			Error:            "invalid_client",
-			ErrorDescription: "Client not found",
-		})
-		return
+		// Auto-register the client with the provided redirect_uri
+		clientInfo = &types.ClientInfo{
+			ClientID:                authReq.ClientID,
+			ClientSecret:            "", // Public client (no secret)
+			RedirectUris:            []string{authReq.RedirectURI},
+			ClientName:              "Auto-registered MCP Client",
+			GrantTypes:              []string{"authorization_code", "refresh_token"},
+			ResponseTypes:           []string{"code"},
+			TokenEndpointAuthMethod: "none", // Public client
+		}
+
+		if err := p.db.StoreClient(clientInfo); err != nil {
+			handlerutils.JSON(w, http.StatusBadRequest, types.OAuthError{
+				Error:            "invalid_client",
+				ErrorDescription: "Client not found and auto-registration failed",
+			})
+			return
+		}
 	}
 
 	if !slices.Contains(clientInfo.RedirectUris, authReq.RedirectURI) {
