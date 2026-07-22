@@ -23,6 +23,8 @@ Here's how it works:
 4. **Request Proxying** - Validates the access token and forwards authenticated requests to your MCP server
 5. **User Context** - Sends necessary headers to the MCP server about user identity and access to external services based on the OAuth scopes you configured
 
+![MCP OAuth Proxy architecture](docs/static/img/architect.png)
+
 ## Headers Sent to MCP Server
 
 When proxying requests to your MCP server, the OAuth proxy automatically injects the following headers with user information:
@@ -42,6 +44,8 @@ These headers allow your MCP server to:
 - **Implement user-specific logic** and access controls
 
 ## Quick Start
+
+For a more detailed walkthrough, see the [getting started guide](docs/getting-started.md).
 
 ### Prerequisites
 
