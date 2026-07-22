@@ -1,6 +1,4 @@
----
-title: Getting Started
----
+# Getting Started
 
 This guide will help you quickly get MCP OAuth Proxy up and running.
 
@@ -85,22 +83,19 @@ uv run python -m obot_gmail_mcp.server
 
 This will start the server at http://localhost:9000/mcp/gmail.
 
-:::note
-If you are using gmail mcp server, make sure you setup google oauth credentials as described in the [Google OAuth](#google-oauth) section.
-:::
+> [!NOTE]
+> If you are using the Gmail MCP server, set up Google OAuth credentials as described in the [Google OAuth](#google-oauth) section.
 
 ### 3. Run OAuth Proxy
 
-:::note
-Different Auth provider have different authorize urls. Make sure you use the correct one for your auth provider. Here is a list of authorize urls for different auth providers:
-
-- Google: https://accounts.google.com
-- Microsoft: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-- GitHub: https://github.com/login/oauth/authorize
-
-Make sure you are supplying the correct authorize url in the environment variables `OAUTH_AUTHORIZE_URL`.
-
-:::
+> [!NOTE]
+> OAuth providers use different authorization URLs. Use the URL for your provider:
+>
+> - Google: `https://accounts.google.com`
+> - Microsoft: `https://login.microsoftonline.com/common/oauth2/v2.0/authorize`
+> - GitHub: `https://github.com/login/oauth/authorize`
+>
+> Set this URL with the `OAUTH_AUTHORIZE_URL` environment variable.
 
 #### Option A: Docker
 
@@ -149,34 +144,23 @@ docker run -d --name mcp-oauth-proxy -p 8080:8080 \
 | `DATABASE_DSN`        | ❌       | Database connection string (defaults to SQLite)           |
 | `ENCRYPTION_KEY`      | ✅       | Base64-encoded 32-byte AES key                            |
 
-:::note
-You can generate a random encryption key using the following command:
+> [!NOTE]
+> Generate a random encryption key with `openssl rand -base64 32` and store it securely.
 
-```bash
-openssl rand -base64 32
-```
-
-Make sure you are storing the encryption key in a secure way.
-
-:::
-
-:::note
-By default, you can use the proxy with sqlite database and it will store the db locally in a file called `oauth-proxy.db`.
-
-In production, it is recommended to use postgres database. You can use the following command to create a postgres database:
-
-```bash
-docker run -d --name mcp-oauth-proxy-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=oauth-proxy postgres
-```
-
-Then you can set the `DATABASE_DSN` environment variable to the connection string of your postgres database.
-For example:
-
-```bash
-DATABASE_DSN="postgresql://postgres:postgres@localhost:5432/oauth-proxy"
-```
-
-:::
+> [!NOTE]
+> By default, the proxy uses SQLite and stores the database locally in `oauth-proxy.db`.
+>
+> PostgreSQL is recommended for production. You can create a local PostgreSQL database with:
+>
+> ```bash
+> docker run -d --name mcp-oauth-proxy-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=oauth-proxy postgres
+> ```
+>
+> Then set `DATABASE_DSN` to the PostgreSQL connection string. For example:
+>
+> ```bash
+> DATABASE_DSN="postgresql://postgres:postgres@localhost:5432/oauth-proxy"
+> ```
 
 ## Verification
 
@@ -195,14 +179,14 @@ You can now test your setup by using vscode MCP.
 }
 ```
 
-4. **Authentication Flow**:
+2. **Authentication Flow**:
 
 - When VSCode first connects, it will open a browser for OAuth authentication
 - Sign in with your Google account
 - Grant the requested permissions
 - VSCode will receive the access token and can now communicate with the Gmail MCP server
 
-5. **Test the Connection**:
+3. **Test the Connection**:
 
 - Open copilot panel in vscode
 - prompt to get the list of emails
