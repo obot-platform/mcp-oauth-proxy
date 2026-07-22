@@ -83,10 +83,12 @@ uv run python -m obot_gmail_mcp.server
 
 This will start the server at http://localhost:9000/mcp/gmail.
 
+> [!NOTE]
 > If you are using the Gmail MCP server, set up Google OAuth credentials as described in the [Google OAuth](#google-oauth) section.
 
 ### 3. Run OAuth Proxy
 
+> [!NOTE]
 > OAuth providers use different authorization URLs. Use the URL for your provider:
 >
 > - Google: `https://accounts.google.com`
@@ -142,22 +144,23 @@ docker run -d --name mcp-oauth-proxy -p 8080:8080 \
 | `DATABASE_DSN`        | ❌       | Database connection string (defaults to SQLite)           |
 | `ENCRYPTION_KEY`      | ✅       | Base64-encoded 32-byte AES key                            |
 
+> [!NOTE]
 > Generate a random encryption key with `openssl rand -base64 32` and store it securely.
 
-By default, the proxy uses SQLite and stores the database locally in `oauth-proxy.db`.
-
-PostgreSQL is recommended for production. You can create a local PostgreSQL database with:
-
-```bash
-docker run -d --name mcp-oauth-proxy-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=oauth-proxy postgres
-```
-
-Then you can set the `DATABASE_DSN` environment variable to the connection string of your postgres database.
-For example:
-
-```bash
-DATABASE_DSN="postgresql://postgres:postgres@localhost:5432/oauth-proxy"
-```
+> [!NOTE]
+> By default, the proxy uses SQLite and stores the database locally in `oauth-proxy.db`.
+>
+> PostgreSQL is recommended for production. You can create a local PostgreSQL database with:
+>
+> ```bash
+> docker run -d --name mcp-oauth-proxy-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=oauth-proxy postgres
+> ```
+>
+> Then set `DATABASE_DSN` to the PostgreSQL connection string. For example:
+>
+> ```bash
+> DATABASE_DSN="postgresql://postgres:postgres@localhost:5432/oauth-proxy"
+> ```
 
 ## Verification
 
